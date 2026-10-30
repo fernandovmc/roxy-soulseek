@@ -158,6 +158,158 @@ function pruneCache(keep) {
   }
 }
 
+// ---------- tags e capa embutida do FLAC (artista/título limpos para letra e capa) ----------
+function flacMeta(file) {
+  let fd;
+  try {
+    fd = fs.openSync(file, 'r');
+    const head = Buffer.alloc(4);
+    fs.readSync(fd, head, 0, 4, 0);
+    if (head.toString('latin1') !== 'fLaC') return null;
+    const out = {};
+    let pos = 4;
+    for (let last = false; !last;) {
+      const h = Buffer.alloc(4);
+      if (fs.readSync(fd, h, 0, 4, pos) < 4) break;
+      last = (h[0] & 0x80) !== 0;
+      const type = h[0] & 0x7f;
+      const len = h.readUIntBE(1, 3);
+      pos += 4;
+      if (type === 4 || (type === 6 && !out.picture)) {
+        const b = Buffer.alloc(len);
+        fs.readSync(fd, b, 0, len, pos);
+        if (type === 4) { // VORBIS_COMMENT (comprimentos little-endian)
+          let o = 4 + b.readUInt32LE(0);
+          const n = b.readUInt32LE(o); o += 4;
+          for (let i = 0; i < n; i++) {
+            const l = b.readUInt32LE(o); o += 4;
+            const s = b.toString('utf8', o, o + l); o += l;
+            const k = s.slice(0, s.indexOf('=')).toLowerCase();
+            if (['artist', 'title', 'album'].includes(k) && !out[k]) out[k] = s.slice(k.length + 1);
+          }
+        } else { // PICTURE (big-endian)
+          let o = 4;
+          const ml = b.readUInt32BE(o); o += 4;
+          const mime = b.toString('latin1', o, o + ml); o += ml;
+          o += 4 + b.readUInt32BE(o) + 16; // descrição + largura/altura/profundidade/cores
+          const pl = b.readUInt32BE(o); o += 4;
+          out.picture = 'data:' + (mime || 'image/jpeg') + ';base64,' + b.subarray(o, o + pl).toString('base64');
+        }
+      }
+      pos += len;
+    }
+    return out;
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+// ---------- capa pelo Deezer (sem chave) ----------
+const artCache = new Map();
+async function artLookup(query) {
+  const q = String(query || '').trim().slice(0, 200);
+  if (!q) return null;
+  if (artCache.has(q)) return artCache.get(q);
+  let art = null;
+  try {
+    const r = await fetch('https://api.deezer.com/search?limit=1&q=' + encodeURIComponent(q), { signal: AbortSignal.timeout(10000) });
+    const hit = r.ok && (await r.json()).data?.[0];
+    if (hit && hit.album) {
+      art = { s: hit.album.cover_medium, l: hit.album.cover_xl, artist: hit.artist && hit.artist.name, title: hit.title };
+    }
+  } catch {
+    return null; // falha de rede não entra no cache
+  }
+  artCache.set(q, art);
+  return art;
+}
+
+// ---------- letras pelo LRCLIB (sem chave), com cache em disco ----------
+const LRCLIB = 'https://lrclib.net/api/';
+const lyricsDir = () => path.join(app.getPath('userData'), 'lyrics');
+const looseKey = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+
+async function lrclib(pathAndQuery) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await fetch(LRCLIB + pathAndQuery, {
+        headers: { 'User-Agent': 'Roxy (https://github.com/fernandovmc/roxy-soulseek)' }, signal: AbortSignal.timeout(8000)
+      });
+      if (r.status === 404) return { found: false };
+      if (r.ok) return { found: true, data: await r.json() };
+    } catch {}
+    await sleep(1500 * (attempt + 1)); // o LRCLIB às vezes responde 503 (sobrecarga)
+  }
+  return null; // indisponível: não grava no cache
+}
+
+function parseLrc(text) {
+  const lines = [];
+  for (const raw of String(text || '').split(/\r?\n/)) {
+    const m = raw.match(/^\[(\d+):(\d+(?:\.\d+)?)\](.*)$/);
+    if (m) lines.push({ t: Math.round((+m[1] * 60 + +m[2]) * 1000), text: m[3].trim() });
+  }
+  return lines.length ? lines : null;
+}
+
+// LRCLIB: { synced, plain } | false (não tem) | null (fora do ar)
+async function fromLrclib(artist, title, sec) {
+  const q = new URLSearchParams({ artist_name: artist, track_name: title });
+  if (sec) {
+    const r = await lrclib('get?' + q + '&duration=' + sec);
+    if (!r) return null;
+    if (r.found) return r.data.instrumental ? false : { synced: parseLrc(r.data.syncedLyrics), plain: r.data.plainLyrics || null };
+  }
+  const r = await lrclib('search?' + q);
+  if (!r) return null;
+  const list = (r.found && Array.isArray(r.data) ? r.data : [])
+    .filter((x) => !x.instrumental && (!sec || !x.duration || Math.abs(x.duration - sec) <= 4));
+  const rec = list.find((x) => x.syncedLyrics) || list.find((x) => x.plainLyrics);
+  return rec ? { synced: parseLrc(rec.syncedLyrics), plain: rec.plainLyrics || null } : false;
+}
+
+// NetEase Music (API pública, reserva quando o LRCLIB está fora ou não tem): mesmo formato de retorno.
+async function fromNetease(artist, title, sec) {
+  const headers = { 'User-Agent': 'Mozilla/5.0', Referer: 'https://music.163.com/' };
+  try {
+    const s = await (await fetch('https://music.163.com/api/search/get?type=1&limit=10&s=' +
+      encodeURIComponent(artist + ' ' + title), { headers, signal: AbortSignal.timeout(8000) })).json();
+    const a = looseKey(artist).split(' ')[0];
+    const hit = ((s.result && s.result.songs) || []).find((x) =>
+      looseKey(x.name).includes(looseKey(title)) &&
+      (x.artists || []).some((y) => looseKey(y.name).includes(a)) &&
+      (!sec || !x.duration || Math.abs(x.duration / 1000 - sec) <= 4));
+    if (!hit) return false;
+    const l = await (await fetch('https://music.163.com/api/song/lyric?lv=1&id=' + hit.id,
+      { headers, signal: AbortSignal.timeout(8000) })).json();
+    // tira as linhas de crédito ("作词 : ...", "作曲 : ...")
+    const lrc = String((l.lrc && l.lrc.lyric) || '').split('\n').filter((x) => !/[\u4e00-\u9fff]+\s*[:：]/.test(x)).join('\n');
+    const synced = parseLrc(lrc);
+    return synced ? { synced, plain: null } : false;
+  } catch {
+    return null;
+  }
+}
+
+async function lyricsFor({ artist, title, duration }) {
+  if (!artist || !title) return null;
+  const sec = duration ? Math.round(duration / 1000) : 0;
+  const key = crypto.createHash('sha1').update(looseKey(artist) + '|' + looseKey(title) + '|' + sec).digest('hex');
+  const file = path.join(lyricsDir(), key + '.json');
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+
+  const a = await fromLrclib(artist, title, sec);
+  const b = a && a.synced ? null : await fromNetease(artist, title, sec);
+  const out = (b && b.synced ? b : a) || null;
+  // grava "sem letra" só quando as duas fontes responderam; se alguma estava fora, tenta de novo depois
+  if (!out && (a === null || b === null)) return null;
+  const save = out || { synced: null, plain: null };
+  try { fs.mkdirSync(lyricsDir(), { recursive: true }); fs.writeFileSync(file, JSON.stringify(save)); } catch {}
+  return save;
+}
+
 // ---------- playlist/álbum público do Spotify pelo link (sem login) ----------
 async function spotifyPublic(link) {
   const m = String(link || '').match(/(playlist|album)[/:]([A-Za-z0-9]{22})/);
@@ -545,7 +697,7 @@ function createLoginWindow() {
 
 function createWindow() {
   mainWin = baseWindow({
-    width: 1080, height: 720, minWidth: 820, minHeight: 560,
+    width: 1280, height: 760, minWidth: 820, minHeight: 560,
     backgroundColor: '#0c1210'
   });
   mainWin.on('closed', () => { mainWin = null; });
@@ -607,6 +759,13 @@ app.whenReady().then(() => {
     return f ? pathToFileURL(f).href : null;
   });
   ipcMain.handle('cache:prune', (_e, keep) => pruneCache(keep));
+  ipcMain.handle('track:meta', (_e, track) => {
+    if (!track || !track.filename) return null;
+    const f = findLocal(track);
+    return f && /\.flac$/i.test(f) ? flacMeta(f) : null;
+  });
+  ipcMain.handle('art:lookup', (_e, query) => artLookup(query));
+  ipcMain.handle('lyrics:get', (_e, req) => lyricsFor(req || {}));
   ipcMain.handle('spotify:public', (_e, link) =>
     spotifyGuard(() => spotifyPublic(link)));
   ipcMain.handle('slsk:pickFolder', async () => {

@@ -30,6 +30,7 @@ You do not need to install Node.js to use the packaged application. If Windows d
 - Playback queue with play, pause, previous, next, seek, and volume controls.
 - Library: save tracks with the heart button, browse recently played tracks, and create and manage local playlists.
 - Bounded download cache: tracks you only listened to are cleaned up automatically; saved and playlist tracks are kept.
+- Synced lyrics in the center of the window, with the album cover spinning when no lyrics are available, and album covers in every track list.
 - Import public Spotify playlists and albums by pasting a link (no login), or import your own playlists and liked songs through Spotify's authorization flow.
 - Choose a custom background and adjust the glass/transparency appearance.
 - Optionally remember the Soulseek login on the device.
@@ -134,6 +135,17 @@ When no peer can send a lossless copy right away, Roxy waits in a peer's upload 
 
 slskd allows only one search at a time, so Roxy runs searches one after another. A manual search may wait for a background prefetch lookup to finish (up to about 20 seconds).
 
+## Lyrics and artwork
+
+The center of the window shows the lyrics of the current track. Synced lyrics highlight the current line and keep it centered as the track plays; clicking a line seeks to it. When a track has no lyrics, its cover is shown spinning in the center instead.
+
+- **Track details.** For FLAC files, Roxy reads the artist, title and embedded front cover from the file's metadata. Otherwise it uses the artist and title matched by the artwork lookup, then the file name.
+- **Lyrics sources.** [LRCLIB](https://lrclib.net) first (matched by artist, title and duration), then [NetEase Music](https://music.163.com) as a fallback when LRCLIB is unavailable or has no synced lyrics. Neither requires an API key.
+- **Lyrics cache.** Results are cached under the app's user data folder (`lyrics/`). A "no lyrics" result is cached only when every source answered, so a temporary outage is retried on the next play.
+- **Artwork.** Covers come from the embedded FLAC picture when present, otherwise from the [Deezer search API](https://developers.deezer.com/api/search). They are shown in track lists, the queue, the player bar, and the center of the window.
+
+When the queue is open in a window narrower than 1180 px, the center is hidden because there is not enough room.
+
 ## Library and download cache
 
 Downloaded files behave like a streaming cache:
@@ -197,6 +209,9 @@ roxy-soulseek/
 - **Soulseek** — peer-to-peer music sharing network: <https://www.slsknet.org/>
 - **Spotify Web API** — playlist metadata and OAuth authorization: <https://developer.spotify.com/documentation/web-api>
 - **Spotify embed pages** — public playlist and album track lists for link import: <https://developer.spotify.com/documentation/embeds>
+- **LRCLIB** — synced lyrics: <https://lrclib.net>
+- **NetEase Music** — fallback synced lyrics: <https://music.163.com>
+- **Deezer API** — album artwork lookup: <https://developers.deezer.com/api>
 
 The npm dependencies and exact resolved versions are recorded in `package.json` and `package-lock.json`.
 
@@ -243,6 +258,8 @@ Keep the same filenames and paths unless you also update the references in the s
 ## Data and privacy
 
 Roxy stores its settings in Electron's per-user application data directory. The app uses Electron's `safeStorage` when available to protect saved credentials and the local slskd API key. If operating-system encryption is unavailable, the current implementation falls back to base64 encoding, which is **not encryption**. Do not use the remember-login option on a shared or untrusted Windows account.
+
+To show lyrics and artwork, Roxy sends the artist and title of the playing track (and of listed tracks, for covers) to LRCLIB, NetEase Music and Deezer. No account or personal data is sent.
 
 Music files are downloaded from other Soulseek users to the local slskd downloads directory. Files that are neither saved nor part of a playlist are deleted automatically once the 5 GB cache limit is exceeded (see [Library and download cache](#library-and-download-cache)). Saved tracks, recent history, and playlists are stored in the app's local storage on this device. Spotify authorization is handled through the system browser and the local PKCE callback.
 

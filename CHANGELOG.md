@@ -16,6 +16,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Recently played tracks (last 50) in a new **Recentes** tab, with a button to clear the history.
 - A 5 GB download cache that removes the least recently played files that are neither saved nor in a playlist.
 - Import of public Spotify playlists and albums by link, without signing in (up to 100 tracks per link).
+- Synced lyrics in the center of the window from LRCLIB, with NetEase Music as a fallback. The current line is highlighted and clickable to seek; lyrics are cached on disk.
+- The album cover spins in the center of the window when a track has no lyrics.
+- Album covers in track lists, the queue and the player bar, from the embedded FLAC picture or the Deezer search API.
+- FLAC metadata (artist, title, embedded cover) is read to look up lyrics with clean tags.
 
 ### Changed
 
@@ -23,6 +27,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Searches run one at a time, because slskd rejects concurrent searches with HTTP 429.
 - The signed-in Spotify import button is now labeled **Minhas playlists do Spotify**.
 - Download status messages name the peer serving the file and the position in its upload queue.
+- Starting playback no longer opens the queue drawer, so the lyrics stay visible.
+- The default window size is 1280x760 (was 1080x720).
 
 ### Fixed
 
