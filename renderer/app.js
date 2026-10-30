@@ -586,6 +586,24 @@ function playTracks(tracks, start = 0) {
   playIndex(start);
 }
 
+// Capa da playlist: a do Spotify quando importada; senão um mosaico com as capas das 4 primeiras faixas.
+function playlistCover(pl) {
+  const box = el('div', { class: 'pl-cover', onclick: () => openPlaylist(pl.id) }, '♫');
+  if (pl.cover) {
+    box.replaceChildren(el('img', { src: pl.cover, alt: '' }));
+    return box;
+  }
+  const first = pl.tracks.slice(0, 4);
+  Promise.all(first.map(ensureArt)).then((arts) => {
+    const urls = arts.filter((a) => a && a.s).map((a) => a.s);
+    if (!urls.length) return;
+    const use = urls.length >= 4 ? urls.slice(0, 4) : urls.slice(0, 1);
+    box.classList.toggle('mosaic', use.length === 4);
+    box.replaceChildren(...use.map((u) => el('img', { src: u, alt: '' })));
+  });
+  return box;
+}
+
 function renderPlaylists() {
   const ul = $('pl-list');
   ul.replaceChildren();
@@ -595,6 +613,7 @@ function renderPlaylists() {
     const n = pl.tracks.length;
     ul.append(
       el('li', { class: 'pl-row' },
+        playlistCover(pl),
         el('button', { class: 'pl-open', onclick: () => openPlaylist(pl.id) },
           el('span', { class: 'pl-name' }, pl.name),
           el('span', { class: 'pl-count' }, n + (n === 1 ? ' faixa' : ' faixas'))),
@@ -735,6 +754,7 @@ function importSpotify(r) {
       pl = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: p.name, tracks: [] };
       playlists.push(pl);
     }
+    if (p.cover) pl.cover = p.cover;
     const have = new Set(pl.tracks.map(trackKey));
     tracks.forEach((t) => { if (!have.has(trackKey(t))) { pl.tracks.push(slimTrack(t)); added++; } });
   });

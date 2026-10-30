@@ -326,7 +326,8 @@ async function spotifyPublic(link) {
   const tracks = e.trackList.filter((t) => t && t.title).map((t) => ({
     id: String(t.uri || '').split(':').pop() || t.title, title: t.title, artist: t.subtitle || '', duration: t.duration || undefined
   }));
-  return { playlists: [{ name: e.name || e.title || 'Spotify', tracks }], skipped: [], capped: tracks.length >= 100 };
+  const cover = (e.coverArt && e.coverArt.sources && e.coverArt.sources[0] && e.coverArt.sources[0].url) || null;
+  return { playlists: [{ name: e.name || e.title || 'Spotify', cover, tracks }], skipped: [], capped: tracks.length >= 100 };
 }
 
 // ---------- imagem de fundo ----------
@@ -607,6 +608,7 @@ function toSlimTrack(t) {
 }
 
 let spotifyToken_ = null;
+const spotifyCovers = new Map(); // id da playlist -> capa, guardado na listagem para o import
 const LIKED_ID = '__liked__';
 
 // Passo 1: login e lista das playlists disponíveis (sem baixar as faixas ainda).
@@ -627,11 +629,13 @@ async function spotifyList(send) {
     name: p.name,
     total: (p.items && p.items.total) ?? (p.tracks && p.tracks.total) ?? null,
     isPublic: p.public === true,
+    cover: (p.images && p.images[0] && p.images[0].url) || null,
     owner: (p.owner && (p.owner.display_name || p.owner.id)) || ''
   }));
 
   const liked = await spotifyGet(spotifyToken_, 'https://api.spotify.com/v1/me/tracks?limit=1');
   if (liked.ok) playlists.unshift({ id: LIKED_ID, name: 'Músicas curtidas', total: liked.data.total ?? null, isPublic: false, owner: '' });
+  playlists.forEach((p) => { if (p.cover) spotifyCovers.set(p.id, p.cover); });
   return { playlists };
 }
 
@@ -657,7 +661,7 @@ async function spotifyFetch(ids, nameById, send) {
     if (r.status === 401) { spotifyToken_ = null; throw new Error('A sessão do Spotify expirou. Clique em importar de novo.'); }
     if (!r.ok) { skipped.push(name); continue; }
     const tracks = r.items.map((it) => toSlimTrack(it && (it.item || it.track))).filter(Boolean);
-    if (tracks.length) out.push({ name, tracks });
+    if (tracks.length) out.push({ name, cover: spotifyCovers.get(id) || null, tracks });
   }
   return { playlists: out, skipped };
 }

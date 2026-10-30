@@ -181,7 +181,15 @@ input[type="search"]:focus,input[type="text"]:focus {
 .actions button:hover { transform:scale(1.35) rotate(-10deg); background:rgba(255,255,255,.18); }
 .actions button:active { transform:scale(.8); }
 .actions button.on { color:var(--accent); }
-.pl-row { display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center; padding:6px; border-radius:16px;
+.pl-cover {
+  width:48px; height:48px; border-radius:12px; overflow:hidden; cursor:pointer; display:grid; place-items:center;
+  border:1px solid rgba(255,255,255,.2); color:var(--muted); background:rgba(255,255,255,.04);
+  transition:transform .5s var(--spring);
+}
+.pl-cover img { width:100%; height:100%; object-fit:cover; display:block; animation:pop .5s var(--spring) both; }
+.pl-cover.mosaic { grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; }
+.pl-row:hover .pl-cover { transform:rotate(-6deg) scale(1.08); }
+.pl-row { display:grid; grid-template-columns:48px minmax(0,1fr) auto; gap:8px; align-items:center; padding:6px; border-radius:16px;
   animation:item-in .75s var(--spring) backwards; animation-delay:calc(min(var(--i,0), 14) * 55ms);
   transition:translate .45s var(--spring), background .25s; }
 .pl-row:hover { translate:6px 0; background:rgba(255,255,255,.07); }
