@@ -1,11 +1,61 @@
 const AUDIO_EXT = new Set(['mp3', 'flac', 'ogg', 'opus', 'wav', 'm4a', 'aac']);
+const LOSSLESS = new Set(['flac', 'wav']);
+const RACE = 3; // quantos usuários recebem o pedido da mesma faixa ao mesmo tempo
+const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/\(.*?\)|\[.*?\]/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
+// como norm, mas mantém o que está entre parênteses ("Creep (Acoustic)" ≠ "Creep")
+const loose = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^a-z0-9]+/g, ' ').trim();
+const fileOf = (t) => ({ username: t.username, filename: t.filename, size: t.size, ext: t.ext, bitrate: t.bitrate, detail: t.detail });
+
+// versões que quase nunca são o que a pessoa procura (a menos que ela tenha digitado a palavra)
+const JUNK = new Set(['remix', 'mix', 'live', 'cover', 'karaoke', 'instrumental', 'acapella', 'acoustic', 'demo',
+  'edit', 'version', 'slowed', 'reverb', 'sped', 'nightcore', 'tribute', 'rehearsal', 'bootleg', 'unplugged', '8d',
+  'quartet', 'lullaby', 'covers']);
+const LIVE_DATE = /(19|20)\d\d[-.]\d\d[-.]\d\d/; // pastas de show: "1993-10-08 - boston"
+
+const folderTokens = (file) => new Set(loose(String(file).split(/[\\/]/).slice(-3, -1).join(' ')).split(' '));
+
+// "Coldplay - Parachutes - 05 - Yellow.flac" → título "Yellow", artista "Coldplay"
+function splitName(file) {
+  const base = baseName(file).replace(/\.[^.]+$/, '').replace(/_/g, ' ').trim();
+  const parts = base.split(/\s+[-–—]+\s+/).map((s) => s.trim()).filter((s) => s && !/^\d{1,3}$/.test(s));
+  // partes que só repetem o nome das pastas são artista/álbum ("Help Is Round the Corner - Coldplay")
+  const folders = folderTokens(file);
+  const own = parts.filter((p) => !loose(p).split(' ').every((w) => folders.has(w)));
+  let title = own.length ? own[own.length - 1] : parts.length ? parts[parts.length - 1] : base;
+  title = title.replace(/^\d{1,3}(?:\s*[-._)]\s*|\s+)/, '').trim() || title;
+  return { title, artist: parts.length > 1 ? parts[0] : parentFolder(file) };
+}
+
+// Chave da música para juntar cópias: título sem números nem palavras que já estão nas pastas
+// ("Radiohead Pablo Honey 02 Creep" em "Radiohead/Pablo Honey" vira "creep").
+function songKey(title, file) {
+  const folders = folderTokens(file);
+  const all = loose(title).split(' ').filter((w) => w && !/^\d+$/.test(w));
+  const own = all.filter((w) => !folders.has(w));
+  return (own.length ? own : all).join(' ');
+}
+
+// Pontua um arquivo para a busca: termos no título, termos perto dele (pastas de artista/álbum), versões "lixo".
+function relevance(qTok, title, file) {
+  if (!qTok.length) return 0;
+  const tTok = loose(title).split(' ').filter(Boolean);
+  const folders = folderTokens(file);
+  const hits = qTok.filter((w) => tTok.includes(w)).length;
+  const junk = tTok.filter((w) => JUNK.has(w) && !qTok.includes(w)).length;
+  const folderJunk = [...folders].some((w) => JUNK.has(w) && !qTok.includes(w)) || (LIVE_DATE.test(file) && !qTok.includes('live'));
+  const extra = tTok.filter((w) => !qTok.includes(w) && !folders.has(w) && !/^\d+$/.test(w)).length;
+  // "Creep (Radiohead)": o artista buscado entre parênteses no título é cover.
+  const paren = loose((title.match(/[([{]([^)\]}]*)[)\]}]/) || [])[1]).split(' ').filter((w) => w && !/^\d+$/.test(w));
+  const cover = paren.length && paren.every((w) => qTok.includes(w)) &&
+    !loose(title.replace(/[([{].*?[)\]}]/g, ' ')).split(' ').some((w) => paren.includes(w));
+  return (qTok.every((w) => tTok.includes(w) || folders.has(w)) ? 3 : 0) + 4 * hits / qTok.length
+    - (hits ? 0 : 6) // nenhum termo no título: é outra faixa do mesmo álbum/single
+    - 8 * junk - (folderJunk ? 5 : 0) - (cover ? 8 : 0) - Math.min(3, 0.5 * extra);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const baseName = (p) => String(p || '').split(/[\\/]/).pop();
-
-function cleanTitle(file) {
-  const name = baseName(file).replace(/\.[^.]+$/, '');
-  return name.replace(/^\s*\d{1,3}\s*[-._)]+\s*/, '').trim() || name;
-}
 
 function parentFolder(file) {
   const parts = String(file || '').split(/[\\/]/).filter(Boolean);
@@ -76,20 +126,21 @@ class SoulseekProvider {
       if (last.isComplete) break;
     }
     this._req('DELETE', '/searches/' + id).catch(() => {});
-    return this._toTracks((last && last.responses) || []);
+    return this._toTracks((last && last.responses) || [], query);
   }
 
-  _toTracks(responses) {
-    const out = [];
+  // Uma linha por música: as cópias de vários usuários viram uma só (e fontes da corrida).
+  // Ordem: relevância para a busca + popularidade (quantos usuários têm); dentro da música, a melhor versão.
+  _toTracks(responses, query = '') {
+    const qTok = loose(query).split(' ').filter(Boolean);
+    const groups = new Map();
     for (const r of responses) {
       for (const f of r.files || []) {
         const name = f.filename || '';
         const ext = String(f.extension || name.split('.').pop() || '').replace('.', '').toLowerCase();
         if (!AUDIO_EXT.has(ext)) continue;
-        const mb = f.size ? (f.size / 1048576).toFixed(1) + ' MB' : '';
-        const detail = [ext.toUpperCase() + (f.bitRate ? ' ' + f.bitRate + ' kbps' : ''), mb, 'de ' + r.username]
-          .filter(Boolean).join(' · ');
-        out.push({
+        const { title, artist } = splitName(name);
+        const t = {
           source: 'soulseek',
           id: r.username + '|' + name,
           username: r.username,
@@ -97,25 +148,52 @@ class SoulseekProvider {
           size: f.size,
           ext,
           bitrate: f.bitRate,
-          title: cleanTitle(name),
-          artist: parentFolder(name),
-          detail,
+          title,
+          artist,
           duration: f.length ? f.length * 1000 : undefined,
-          _free: r.hasFreeUploadSlot ? 1 : 0,
-          _queue: r.queueLength || 0,
-          _speed: r.uploadSpeed || 0
-        });
+          _quality: f.bitDepth && f.sampleRate
+            ? f.bitDepth + '/' + +(f.sampleRate / 1000).toFixed(1)
+            : f.bitRate ? f.bitRate + ' kbps' : '',
+          _lossless: LOSSLESS.has(ext) ? 1 : 0,
+          _ready: r.hasFreeUploadSlot && !r.queueLength ? 1 : 0,
+          _hq: (f.bitDepth || 16) * (f.sampleRate || 44100) || f.bitRate || 0,
+          _speed: r.uploadSpeed || 0,
+          _score: relevance(qTok, title, name)
+        };
+        // mesma chave e duração parecida (±5 s) = mesma música; sem duração junta com a primeira
+        const k = songKey(title, name);
+        if (!groups.has(k)) groups.set(k, []);
+        const clusters = groups.get(k);
+        const c = clusters.find((x) => !t.duration || !x.ref || Math.abs(x.ref - t.duration) <= 5000);
+        if (c) { c.files.push(t); c.ref = c.ref || t.duration; } else clusters.push({ ref: t.duration, files: [t] });
       }
     }
-    // Quem tem vaga livre, fila curta e conexão rápida vem primeiro (baixa mais rápido).
-    out.sort((a, b) => b._free - a._free || a._queue - b._queue || b._speed - a._speed);
-    return out.slice(0, 60).map(({ _free, _queue, _speed, ...t }) => t);
+
+    const best = (a, b) => b._lossless - a._lossless || b._ready - a._ready || b._hq - a._hq || b._speed - a._speed;
+    const rows = [...groups.values()].flat().map(({ files }) => {
+      files.sort(best);
+      const top = files[0];
+      const users = new Set(files.map((x) => x.username)).size;
+      // média (um arquivo mal nomeado não puxa o grupo) + popularidade
+      const score = files.reduce((s, x) => s + x._score, 0) / files.length + 2 * Math.log2(users);
+      // Fontes extras: outros usuários com a MESMA versão (mesmo formato e resolução), para não perder qualidade.
+      const alts = files.filter((x, i, a) => x.username !== top.username && x.ext === top.ext && x._hq === top._hq &&
+        a.findIndex((y) => y.username === x.username) === i).slice(0, RACE - 1);
+      const mb = top.size ? (top.size / 1048576).toFixed(1) + ' MB' : '';
+      const detail = [top.ext.toUpperCase() + (top._quality ? ' ' + top._quality : ''), mb,
+        users > 1 ? users + ' usuários' : 'de ' + top.username].filter(Boolean).join(' · ');
+      const clean = (x) => {
+        const { _quality, _lossless, _ready, _hq, _speed, _score, ...t } = x;
+        return t;
+      };
+      return { score, top, row: { ...clean(top), detail, alts: alts.map((x) => fileOf({ ...x, detail })) } };
+    });
+    rows.sort((a, b) => b.score - a.score || best(a.top, b.top));
+    return rows.slice(0, 50).map((x) => x.row);
   }
 
   // ----- achar no Soulseek uma música vinda do Spotify (só título e artista) -----
   async findBest(track, onProgress) {
-    const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      .replace(/\(.*?\)|\[.*?\]/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
     const title = norm(track.title);
     const artist = norm(String(track.artist || '').split(',')[0]);
     const tTok = title.split(' ').filter(Boolean);
@@ -131,7 +209,7 @@ class SoulseekProvider {
       const close = track.duration
         ? ok.filter((r) => r.duration && Math.abs(r.duration - track.duration) < 4000)
         : [];
-      return (close[0] || ok[0]);
+      return close[0] || ok[0]; // já vem com as fontes extras da mesma versão
     }
     return null;
   }
