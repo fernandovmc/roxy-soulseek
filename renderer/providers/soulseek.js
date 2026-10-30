@@ -77,7 +77,8 @@ class SoulseekProvider {
     this.name = 'soulseek';
     this.handlers = {};
     this.job = 0;
-    this.transfer = null; // download em andamento: { username, id }
+    this.inflight = new Map(); // downloads em andamento (tocando ou pré-carga), por faixa
+    this.searchQueue = Promise.resolve();
     this.audio = document.getElementById('audio');
     this.audio.volume = 0.7;
 
@@ -109,7 +110,15 @@ class SoulseekProvider {
   }
 
   // ----- busca -----
-  async search(query, onProgress) {
+  // O slskd recusa (429) uma busca enquanto outra está rodando, então elas vão em fila.
+  // Limite conhecido: fila única; a sua busca pode esperar uma da pré-carga terminar (até ~20 s).
+  search(query, onProgress) {
+    const run = this.searchQueue.then(() => this._search(query, onProgress));
+    this.searchQueue = run.catch(() => {});
+    return run;
+  }
+
+  async _search(query, onProgress) {
     const start = await this._req('POST', '/searches', { searchText: query });
     if (!start.ok) throw new Error(this._err(start, 'A busca falhou'));
     const id = start.data && start.data.id;
@@ -215,56 +224,97 @@ class SoulseekProvider {
   }
 
   // ----- download e reprodução -----
+  // O Soulseek só transfere arquivos inteiros (e o slskd trava o arquivo enquanto baixa), então não dá
+  // para tocar no meio do download. O que demora é a fila/conexão com o outro usuário, não a transferência:
+  // por isso pedimos a mesma faixa para até RACE usuários e tocamos a primeira que chegar.
   async play(track, onStatus) {
     const job = ++this.job;
-    this._cancelTransfer();
+    const alive = () => job === this.job;
     this.audio.pause();
 
     let url = await window.api.slskFind(track);
     if (!url) {
-      await this._download(track, job, onStatus);
-      if (job !== this.job) return;
+      const won = await this.fetch(track, alive, onStatus);
+      if (!alive() || !won) return;
+      Object.assign(track, fileOf(won)); // pode ser outro objeto da mesma faixa (pré-carga)
       url = await window.api.slskFind(track);
       if (!url) {
         throw new Error('O download terminou, mas não achei o arquivo na pasta de downloads. Confira o caminho na aba Conexão.');
       }
     }
-    if (job !== this.job) return;
+    if (!alive()) return;
     this.audio.src = url;
     await this.audio.play();
   }
 
-  async _download(track, job, onStatus) {
-    const files = [{ filename: track.filename, size: track.size }];
-    const user = encodeURIComponent(track.username);
-    let r = await this._req('POST', '/transfers/downloads/' + user, files);
+  // Baixa a faixa (ou reaproveita o download que a pré-carga já começou). Devolve a fonte que venceu.
+  fetch(track, alive = () => true, onStatus) {
+    const key = track.username + '|' + track.filename;
+    if (!this.inflight.has(key)) {
+      const p = (async () => {
+        if (await window.api.slskFind(track)) return track;
+        const won = await this._race(track, alive, onStatus);
+        if (won) Object.assign(track, won); // a faixa passa a apontar para a fonte que chegou primeiro
+        return won;
+      })();
+      this.inflight.set(key, p);
+      p.finally(() => this.inflight.delete(key)).catch(() => {});
+    }
+    return this.inflight.get(key);
+  }
+
+  async _enqueue(c) {
+    const files = [{ filename: c.filename, size: c.size }];
+    let r = await this._req('POST', '/transfers/downloads/' + encodeURIComponent(c.username), files);
     if (!r.ok && [404, 405, 410].includes(r.status)) {
       // Versões novas do slskd podem ter trocado o endpoint antigo pelo de lotes.
-      r = await this._req('POST', '/transfers/downloads/batches', { username: track.username, files, options: {} });
+      r = await this._req('POST', '/transfers/downloads/batches', { username: c.username, files, options: {} });
     }
     if (!r.ok) throw new Error(this._err(r, 'Não consegui iniciar o download'));
     if (r.status === 200 && r.data && Array.isArray(r.data.failed) && r.data.failed.length) {
       throw new Error('O slskd não conseguiu colocar o arquivo na fila de download.');
     }
+  }
 
-    const started = Date.now();
-    while (job === this.job) {
-      await sleep(1500);
-      const s = await this._req('GET', '/transfers/downloads/' + user);
-      const f = s.ok ? this._findTransfer(s.data, track.filename) : null;
-      if (f) {
-        this.transfer = { username: track.username, id: f.id };
-        const st = String(f.state || '');
-        if (/Succeeded/i.test(st)) { this.transfer = null; return; }
-        if (/Completed/i.test(st)) {
-          this.transfer = null;
-          throw new Error('O download falhou (' + st + '). Tente outro resultado.');
+  async _race(track, alive, onStatus) {
+    const started = [];
+    let lastErr = null;
+    for (const c of [fileOf(track), ...(track.alts || [])].slice(0, RACE)) {
+      try { await this._enqueue(c); started.push({ c, id: null, dead: false }); } catch (e) { lastErr = e; }
+    }
+    if (!started.length) throw lastErr;
+
+    let winner = null;
+    const deadline = Date.now() + 10 * 60 * 1000;
+    try {
+      while (alive()) {
+        await sleep(1500);
+        let lead = null;
+        for (const s of started) {
+          if (s.dead) continue;
+          const r = await this._req('GET', '/transfers/downloads/' + encodeURIComponent(s.c.username));
+          const f = r.ok ? this._findTransfer(r.data, s.c.filename) : null;
+          if (!f) continue;
+          s.id = f.id;
+          const st = String(f.state || '');
+          if (/Succeeded/i.test(st)) { winner = s; return s.c; }
+          if (/Completed/i.test(st)) { s.dead = true; continue; }
+          if (!lead || (f.percentComplete || 0) > (lead.percentComplete || 0)) lead = f;
         }
-        if (onStatus) onStatus(describeTransfer(f));
+        if (started.every((s) => s.dead)) throw new Error('O download falhou em todas as fontes. Tente outro resultado.');
+        if (lead && onStatus) {
+          const live = started.filter((s) => !s.dead).length;
+          onStatus(describeTransfer(lead) + (live > 1 ? ' · ' + live + ' fontes' : ''));
+        }
+        if (Date.now() > deadline) throw new Error('Tempo esgotado: os usuários podem estar offline ou com fila longa. Tente outro resultado.');
       }
-      if (Date.now() - started > 10 * 60 * 1000) {
-        this._cancelTransfer();
-        throw new Error('Tempo esgotado: o outro usuário pode estar offline ou com fila longa. Tente outro resultado.');
+      return null; // trocou de música no meio
+    } finally {
+      // Limite conhecido: fonte que ainda não apareceu na lista de transferências não é cancelada; ela termina no cache.
+      for (const s of started) {
+        if (s !== winner && s.id && !s.dead) {
+          this._req('DELETE', '/transfers/downloads/' + encodeURIComponent(s.c.username) + '/' + s.id).catch(() => {});
+        }
       }
     }
   }
@@ -280,14 +330,6 @@ class SoulseekProvider {
       }
     }
     return found;
-  }
-
-  _cancelTransfer() {
-    const t = this.transfer;
-    this.transfer = null;
-    if (t && t.id) {
-      this._req('DELETE', '/transfers/downloads/' + encodeURIComponent(t.username) + '/' + t.id).catch(() => {});
-    }
   }
 
   pause() { this.audio.pause(); }

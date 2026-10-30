@@ -73,7 +73,7 @@ const trackKey = (t) => t.source + ':' + t.id;
 const slimTrack = (t) => ({
   source: t.source, id: t.id, username: t.username, filename: t.filename, size: t.size,
   ext: t.ext, bitrate: t.bitrate, title: t.title, artist: t.artist, detail: t.detail, duration: t.duration,
-  pending: t.pending
+  pending: t.pending, alts: t.alts
 });
 
 // "Minhas músicas" (♥) e "Recentes"
@@ -98,6 +98,17 @@ function pushRecent(track) {
   renderRecent();
 }
 
+// Atualiza o arquivo escolhido (busca do Spotify ou fonte que venceu a corrida) em todo lugar salvo.
+function syncFile(track) {
+  const file = { username: track.username, filename: track.filename, size: track.size, ext: track.ext,
+    bitrate: track.bitrate, detail: track.detail, alts: track.alts, pending: false };
+  const all = [...saved, ...recent, ...playlists.flatMap((pl) => pl.tracks)];
+  all.forEach((t) => { if (trackKey(t) === trackKey(track)) Object.assign(t, file); });
+  savePlaylists();
+  store.set('saved', saved);
+  store.set('recent', recent);
+}
+
 // O cache apaga o que só foi ouvido; músicas salvas e de playlists ficam.
 function pruneCache() {
   const keep = [...saved, ...playlists.flatMap((pl) => pl.tracks)]
@@ -105,6 +116,27 @@ function pruneCache() {
     .flatMap((t) => [t, ...(t.alts || [])])
     .map((t) => ({ filename: t.filename, size: t.size }));
   window.api.cachePrune(keep).catch(() => {});
+}
+
+// Faixa vinda do Spotify só tem título/artista: acha o arquivo no Soulseek (uma vez só por faixa).
+function resolve(track) {
+  if (!track.pending) return Promise.resolve(true);
+  track._resolving = track._resolving || providers.soulseek.findBest(track).then((hit) => {
+    if (!hit) return false;
+    Object.assign(track, { username: hit.username, filename: hit.filename, size: hit.size, ext: hit.ext,
+      bitrate: hit.bitrate, detail: hit.detail, alts: hit.alts, pending: false });
+    syncFile(track);
+    return true;
+  }).finally(() => { delete track._resolving; });
+  return track._resolving;
+}
+
+// Pré-carga: enquanto uma toca, as próximas da fila já vão baixando.
+const PREFETCH = 2;
+function prefetch(from) {
+  state.queue.slice(from, from + PREFETCH).forEach(async (t) => {
+    try { if (await resolve(t)) await providers.soulseek.fetch(t); } catch {}
+  });
 }
 
 // ---------- itens de lista ----------
@@ -254,26 +286,23 @@ async function playIndex(i) {
   try {
     if (track.pending) {
       $('now-artist').textContent = 'Procurando no Soulseek…';
-      const hit = await providers.soulseek.findBest(track);
+      const found = await resolve(track);
       if (token !== playToken) return;
-      if (!hit) {
+      if (!found) {
         const miss = new Error('Não achei "' + track.title + '" no Soulseek. Pulando…');
         miss.notFound = true;
         throw miss;
       }
-      const found = { username: hit.username, filename: hit.filename, size: hit.size, ext: hit.ext,
-        bitrate: hit.bitrate, detail: hit.detail, pending: false };
-      Object.assign(track, found);
-      playlists.forEach((pl) => pl.tracks.forEach((t) => { if (t.id === track.id && t.pending) Object.assign(t, found); }));
-      savePlaylists();
     }
     await providers[track.source].play(track, (text) => {
       if (token === playToken) $('now-artist').textContent = text;
     });
     if (token !== playToken) return;
     state.playing = true;
+    syncFile(track);
     pushRecent(track);
     pruneCache();
+    prefetch(i + 1);
   } catch (e) {
     if (token !== playToken) return;
     state.playing = false;
