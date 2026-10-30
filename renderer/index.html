@@ -15,6 +15,7 @@
       <span class="brand-name">Roxy</span>
     </div>
     <div class="top-actions">
+      <button id="btn-jam" class="chip" type="button" aria-expanded="false">Jam</button>
       <button id="btn-queue" class="chip" type="button">Fila <b id="queue-count">0</b></button>
       <button id="btn-logout" class="chip" type="button">Sair</button>
     </div>
@@ -141,10 +142,30 @@
     </div>
   </footer>
 
+  <section id="jam-panel" class="jam-panel glass" aria-label="Jam" hidden>
+    <h2>Jam</h2>
+    <p id="jam-text" class="hint"></p>
+    <ul id="jam-guests" class="jam-guests"></ul>
+    <div id="jam-invite-row" class="field">
+      <input id="jam-user" type="text" placeholder="Usuário do Soulseek" autocomplete="off">
+      <button id="btn-jam-invite" class="primary small" type="button">Convidar</button>
+    </div>
+    <button id="btn-jam-leave" class="link" type="button" hidden></button>
+  </section>
+
+  <div id="jam-card" class="jam-card glass" role="alertdialog" aria-live="polite" hidden>
+    <p id="jam-card-text"></p>
+    <div class="pl-actions">
+      <button id="btn-jam-accept" class="primary small" type="button">Entrar</button>
+      <button id="btn-jam-decline" class="link" type="button">Recusar</button>
+    </div>
+  </div>
+
   <div id="toast" class="toast" role="status" hidden></div>
   <audio id="audio" preload="auto"></audio>
 
   <script src="providers/soulseek.js"></script>
+  <script src="jam.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -74,13 +74,13 @@ function saveSettings(s) {
 }
 
 // ---------- chamadas à API do slskd (feitas aqui para a chave não ir para a interface) ----------
-const ALLOWED_PATH = /^\/(searches|transfers\/downloads|application)(\/|\?|$)/;
+const ALLOWED_PATH = /^\/(searches|transfers\/downloads|application|conversations)(\/|\?|$)/;
 
 async function slskRequest({ method, path: apiPath, body }) {
   if (typeof apiPath !== 'string' || !ALLOWED_PATH.test(apiPath) || apiPath.includes('..')) {
     return { ok: false, status: 0, error: 'Caminho da API não permitido.' };
   }
-  const m = ['GET', 'POST', 'DELETE'].includes(method) ? method : 'GET';
+  const m = ['GET', 'POST', 'PUT', 'DELETE'].includes(method) ? method : 'GET';
   const headers = { 'X-API-Key': settings.key };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   try {

@@ -255,6 +255,20 @@ input[type="search"]:focus,input[type="text"]:focus {
   body.queue-open .stage { opacity:0; }
 }
 
+/* ---------- jam ---------- */
+.jam-panel, .jam-card {
+  position:fixed; right:24px; top:68px; z-index:30; width:min(320px, calc(100% - 48px)); padding:16px 18px 12px;
+  animation:pop .5s var(--spring) both;
+}
+.jam-panel h2 { margin:0 0 4px; font-size:19px; font-weight:200; letter-spacing:.22em; }
+.jam-panel .hint { margin:4px 0 12px; }
+.jam-guests { list-style:none; margin:0 0 10px; padding:0; }
+.jam-guests li { display:flex; justify-content:space-between; padding:6px 2px; border-bottom:1px solid var(--line); }
+.jam-guests li span { color:var(--muted); font-size:11px; }
+.jam-card { top:auto; bottom:116px; }
+.jam-card p { margin:0 0 10px; line-height:1.5; }
+.chip.on { border-color:var(--accent); color:var(--accent); }
+
 /* ---------- fila (gaveta) ---------- */
 .drawer {
   position:fixed; right:24px; top:68px; bottom:116px; z-index:12;

@@ -401,6 +401,7 @@ async function playIndex(i) {
     pruneCache();
     prefetch(i + 1);
     loadStage(track);
+    jamOnPlay(track);
   } catch (e) {
     if (token !== playToken) return;
     state.playing = false;
@@ -435,6 +436,7 @@ Object.values(providers).forEach((p) => {
     if (currentProvider() !== p) return;
     state.playing = v;
     renderPlayButton();
+    if (!state.loading) jamSync(); // anfitrião: play/pause vai para a jam
   });
   p.on('progress', (pos, dur) => {
     if (currentProvider() !== p) return;
@@ -473,6 +475,7 @@ $('seek').addEventListener('input', () => {
 $('seek').addEventListener('change', () => {
   const p = currentProvider();
   if (p && state.duration) p.seek((Number($('seek').value) / 1000) * state.duration);
+  setTimeout(jamSync, 300); // depois do seek aplicar
   state.seeking = false;
 });
 
@@ -900,6 +903,120 @@ window.addEventListener('mousemove', (e) => {
   const root = document.documentElement.style;
   root.setProperty('--mx', (e.clientX / window.innerWidth - 0.5).toFixed(3));
   root.setProperty('--my', (e.clientY / window.innerHeight - 0.5).toFixed(3));
+});
+
+// ---------- jam: ouvir junto com outros usuários do Roxy ----------
+const jam = new Jam((evt, ...a) => onJam(evt, ...a));
+const JAM_HEARTBEAT_MS = 15000;
+let jamPending = null; // convidado: estado do anfitrião esperando a faixa terminar de baixar
+let jamInvite = null;  // convite recebido: { host, id }
+
+function jamSnapshot() {
+  const t = currentTrack();
+  return {
+    track: t ? slimTrack(t) : null,
+    next: state.queue.slice(state.index + 1, state.index + 3).map(slimTrack), // o convidado já pré-carrega
+    pos: Math.round($('audio').currentTime * 1000),
+    playing: state.playing,
+    at: Date.now()
+  };
+}
+const jamSync = () => { if (jam.role === 'host') jam.broadcast(jamSnapshot()); };
+setInterval(() => { if (jam.role === 'host' && currentTrack()) jamSync(); }, JAM_HEARTBEAT_MS);
+
+// convidado: entra na faixa do anfitrião e se alinha à posição dele
+function jamApply(s) {
+  if (!s.track) return;
+  const cur = currentTrack();
+  if (!cur || trackKey(cur) !== trackKey(s.track)) {
+    jamPending = s;
+    playTracks([s.track, ...(s.next || [])], 0);
+    return;
+  }
+  if (state.loading) { jamPending = s; return; }
+  jamAlign(s);
+}
+
+function jamAlign(s) {
+  const p = currentProvider();
+  if (!p) return;
+  const want = jamTarget(s);
+  if (Math.abs($('audio').currentTime * 1000 - want) > JAM_DRIFT_MS) p.seek(want);
+  if (s.playing && $('audio').paused) p.resume();
+  if (!s.playing && !$('audio').paused) p.pause();
+}
+
+// chamado quando uma faixa começa a tocar
+function jamOnPlay(track) {
+  if (jam.role === 'host') jamSync();
+  if (jam.role === 'guest' && jamPending && trackKey(jamPending.track) === trackKey(track)) {
+    jamAlign(jamPending); // a posição conta o tempo que o download levou
+    jamPending = null;
+  }
+}
+
+function renderJam() {
+  const chip = $('btn-jam');
+  const joined = [...jam.guests.values()].filter((s) => s === 'joined').length;
+  chip.textContent = jam.role === 'guest' ? 'Jam de ' + jam.host : jam.role === 'host' ? 'Jam · ' + joined : 'Jam';
+  chip.classList.toggle('on', !!jam.role);
+  const ul = $('jam-guests');
+  ul.replaceChildren();
+  for (const [user, st] of jam.guests) {
+    ul.append(el('li', {}, user, el('span', {}, st === 'joined' ? 'na jam' : 'convidado')));
+  }
+  $('jam-text').textContent = jam.role === 'guest'
+    ? 'Você está na jam de ' + jam.host + '. O que tocar lá toca aqui, na mesma posição (com 1 a 2 segundos de diferença).'
+    : jam.role === 'host'
+      ? 'Você é o anfitrião: o que você tocar toca para quem entrou. Cada um baixa o mesmo arquivo.'
+      : 'Ouça junto com quem também usa o Roxy. O convite chega por mensagem privada do Soulseek.';
+  $('jam-invite-row').hidden = jam.role === 'guest';
+  $('btn-jam-leave').hidden = !jam.role;
+  $('btn-jam-leave').textContent = jam.role === 'host' ? 'Encerrar a jam' : 'Sair da jam';
+}
+
+function onJam(evt, user, arg) {
+  if (evt === 'changed') return renderJam();
+  if (evt === 'invite') {
+    jamInvite = { host: user, id: arg };
+    $('jam-card-text').textContent = user + ' te chamou para uma jam.';
+    $('jam-card').hidden = false;
+    return;
+  }
+  if (evt === 'joined') { toast(user + ' entrou na jam.', 3000, 'ok'); return jamSync(); }
+  if (evt === 'left') return toast(user + (arg === 'decline' ? ' recusou o convite.' : ' saiu da jam.'), 3000, 'ok');
+  if (evt === 'ended') return toast(user + ' encerrou a jam.', 3500, 'ok');
+  if (evt === 'state') return jamApply(user);
+}
+
+$('btn-jam').addEventListener('click', () => {
+  const open = $('jam-panel').hidden;
+  $('jam-panel').hidden = !open;
+  $('btn-jam').setAttribute('aria-expanded', String(open));
+  if (open) { renderJam(); $('jam-user').focus(); }
+});
+async function jamInviteUser() {
+  try {
+    await jam.invite($('jam-user').value);
+    toast('Convite enviado para ' + $('jam-user').value.trim() + '.', 3000, 'ok');
+    $('jam-user').value = '';
+  } catch (e) {
+    toast(e.message);
+  }
+}
+$('btn-jam-invite').addEventListener('click', jamInviteUser);
+$('jam-user').addEventListener('keydown', (e) => { if (e.key === 'Enter') jamInviteUser(); });
+$('btn-jam-leave').addEventListener('click', () => jam.leave());
+$('btn-jam-accept').addEventListener('click', async () => {
+  $('jam-card').hidden = true;
+  if (!jamInvite) return;
+  try { await jam.accept(jamInvite.host, jamInvite.id); toast('Você entrou na jam de ' + jamInvite.host + '.', 3000, 'ok'); }
+  catch (e) { toast(e.message); }
+});
+$('btn-jam-decline').addEventListener('click', () => {
+  $('jam-card').hidden = true;
+  if (jamInvite) jam.decline(jamInvite.host, jamInvite.id);
+  jamInvite = null;
 });
 
 // ---------- início ----------
