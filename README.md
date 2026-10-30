@@ -4,6 +4,22 @@ Roxy is a Windows desktop music player built with Electron. It searches the Soul
 
 > Roxy is an independent community project. Soulseek, slskd, Spotify, Electron, and their respective trademarks and services belong to their owners.
 
+## Download Roxy
+
+<a href="https://github.com/unfair1k/roxy-soulseek/releases/latest"><img src="https://img.shields.io/badge/Download-Roxy%20for%20Windows-2ea44f?style=for-the-badge&logo=windows" alt="Download Roxy for Windows"></a>
+
+**How to download and install:**
+
+1. Click the **Download Roxy for Windows** button above.
+2. On the Releases page, open the latest version.
+3. Under **Assets**, download the Windows installer named `Roxy-Setup.exe`.
+4. Once the download is complete, double-click the installer and follow the on-screen instructions.
+5. Launch **Roxy** from the Desktop shortcut or Start Menu.
+
+You do not need to install Node.js to use the packaged application. If Windows displays a security warning, make sure you downloaded the installer from this official repository before choosing whether to continue.
+
+> If no installer is listed under **Assets**, a Windows installer has not been published yet. Check back after a release is available.
+
 ## Features
 
 - Sign in with a Soulseek username and password. If the account does not exist, Soulseek may create it during the first connection.
