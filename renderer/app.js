@@ -1,0 +1,665 @@
+const providers = {
+  soulseek: new SoulseekProvider()
+};
+
+const state = { queue: [], index: -1, playing: false, loading: false, duration: 0, seeking: false };
+const $ = (id) => document.getElementById(id);
+let playToken = 0;
+
+// ---------- utilidades ----------
+function el(tag, props = {}, ...children) {
+  const node = document.createElement(tag);
+  Object.entries(props).forEach(([k, v]) => {
+    if (k === 'class') node.className = v;
+    else if (k.startsWith('on')) node.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null) node.setAttribute(k, v);
+  });
+  children.forEach((c) => node.append(c));
+  return node;
+}
+
+function fmt(ms) {
+  const s = Math.max(0, Math.floor((ms || 0) / 1000));
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+
+let toastTimer;
+function toast(msg, ms = 6000, kind = 'error') {
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = 'toast' + (kind === 'ok' ? ' ok' : '');
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (t.hidden = true), ms);
+}
+
+// anima as listas em cascata (cada item entra um pouco depois do anterior)
+function stagger(ul) {
+  [...ul.children].forEach((li, i) => li.style.setProperty('--i', i));
+}
+
+// preenche a parte "já percorrida" dos sliders finos
+function fillRange(input) {
+  const pct = ((input.value - input.min) / (input.max - input.min)) * 100;
+  input.style.setProperty('--p', pct + '%');
+}
+
+const currentTrack = () => state.queue[state.index];
+const currentProvider = () => (currentTrack() ? providers[currentTrack().source] : null);
+
+// ---------- armazenamento local (playlists e aparência) ----------
+const store = {
+  get(key, fallback) {
+    try {
+      const v = localStorage.getItem(key);
+      return v ? JSON.parse(v) : fallback;
+    } catch { return fallback; }
+  },
+  set(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  }
+};
+
+// Só playlists do Soulseek são mantidas (versões antigas guardavam Spotify/SoundCloud).
+let playlists = store.get('playlists', []).map((pl) => ({
+  ...pl,
+  tracks: (pl.tracks || []).filter((t) => t.source === 'soulseek')
+}));
+let openPlaylistId = null;
+let confirmDeleteId = null;
+
+const savePlaylists = () => store.set('playlists', playlists);
+const trackKey = (t) => t.source + ':' + t.id;
+const slimTrack = (t) => ({
+  source: t.source, id: t.id, username: t.username, filename: t.filename, size: t.size,
+  ext: t.ext, bitrate: t.bitrate, title: t.title, artist: t.artist, detail: t.detail, duration: t.duration,
+  pending: t.pending
+});
+
+// ---------- itens de lista ----------
+function trackItem(track, actions, extraClass = '', loading = false) {
+  const art = loading
+    ? el('div', { class: 'ph dance' }, el('img', { src: 'dance.webp', alt: '' }))
+    : el('div', { class: 'ph' }, track.ext ? track.ext.toUpperCase() : '♪');
+  const sub = [track.artist, track.detail].filter(Boolean).join(' · ');
+  return el(
+    'li',
+    { class: 'item ' + track.source + ' ' + extraClass },
+    art,
+    el('div', { class: 'meta' },
+      el('div', { class: 'title', title: track.title }, track.title),
+      el('div', { class: 'artist', title: sub }, sub)),
+    el('div', { class: 'actions' }, ...actions)
+  );
+}
+
+function iconBtn(label, text, fn, attrs = {}) {
+  return el('button', { 'aria-label': label, title: label, onclick: fn, ...attrs }, text);
+}
+
+function playlistBtn(track) {
+  return iconBtn('Adicionar à playlist', '♫', (e) => pickPlaylist(track, e.currentTarget), { 'data-pl-btn': '' });
+}
+
+function renderQueue(animate = false) {
+  const ul = $('queue');
+  ul.replaceChildren();
+  ul.classList.toggle('still', !animate);
+  state.queue.forEach((track, i) => {
+    ul.append(
+      trackItem(
+        track,
+        [
+          iconBtn('Tocar', '▶', () => playIndex(i)),
+          playlistBtn(track),
+          iconBtn('Remover da fila', '✕', () => removeAt(i))
+        ],
+        i === state.index ? 'current' : '',
+        i === state.index && state.loading
+      )
+    );
+  });
+  stagger(ul);
+  $('queue-empty').hidden = state.queue.length > 0;
+  setQueueCount(state.queue.length);
+}
+
+function renderNow() {
+  const t = currentTrack();
+  $('now-title').textContent = t ? t.title : 'Nada tocando';
+  $('now-artist').textContent = t ? [t.artist, t.detail].filter(Boolean).join(' · ') : '';
+  const art = $('now-art');
+  const want = state.loading ? 'dance.webp' : 'icon.png';
+  if (art.getAttribute('src') !== want) art.setAttribute('src', want);
+  art.className = state.loading ? 'dance' : 'disc' + (state.playing ? ' spin' : '');
+}
+
+function renderPlayButton() {
+  const b = $('btn-play');
+  b.textContent = state.playing ? '⏸' : '▶';
+  b.setAttribute('aria-label', state.playing ? 'Pausar' : 'Tocar');
+  document.body.classList.toggle('playing', state.playing);
+  $('now-art').classList.toggle('spin', state.playing && !state.loading && !$('now-art').classList.contains('dance'));
+}
+
+// ---------- fila e reprodução ----------
+function addToQueue(track, playNow = false) {
+  state.queue.push({ ...track });
+  document.body.classList.add('queue-open');
+  renderQueue(true);
+  if (playNow || state.index === -1) playIndex(state.queue.length - 1);
+}
+
+function removeAt(i) {
+  const wasCurrent = i === state.index;
+  state.queue.splice(i, 1);
+  if (i < state.index) state.index--;
+  if (wasCurrent) {
+    playToken++;
+    Object.values(providers).forEach((x) => x.pause());
+    state.index = -1;
+    state.playing = false;
+    state.loading = false;
+    renderNow();
+    renderPlayButton();
+    if (state.queue[i]) return playIndex(i);
+  }
+  renderQueue();
+}
+
+async function playIndex(i) {
+  const track = state.queue[i];
+  if (!track) return;
+  const token = ++playToken;
+  state.index = i;
+  state.duration = 0;
+  state.playing = false;
+  state.loading = true;
+  renderQueue();
+  renderNow();
+  renderPlayButton();
+  $('seek').value = 0;
+  $('time-pos').textContent = '0:00';
+  $('time-dur').textContent = '0:00';
+  $('now-artist').textContent = 'Preparando…';
+
+  try {
+    if (track.pending) {
+      $('now-artist').textContent = 'Procurando no Soulseek…';
+      const hit = await providers.soulseek.findBest(track);
+      if (token !== playToken) return;
+      if (!hit) {
+        const miss = new Error('Não achei "' + track.title + '" no Soulseek. Pulando…');
+        miss.notFound = true;
+        throw miss;
+      }
+      const found = { username: hit.username, filename: hit.filename, size: hit.size, ext: hit.ext,
+        bitrate: hit.bitrate, detail: hit.detail, pending: false };
+      Object.assign(track, found);
+      playlists.forEach((pl) => pl.tracks.forEach((t) => { if (t.id === track.id && t.pending) Object.assign(t, found); }));
+      savePlaylists();
+    }
+    await providers[track.source].play(track, (text) => {
+      if (token === playToken) $('now-artist').textContent = text;
+    });
+    if (token !== playToken) return;
+    state.playing = true;
+  } catch (e) {
+    if (token !== playToken) return;
+    state.playing = false;
+    toast(e.message, e.notFound ? 3500 : 6000);
+    if (e.notFound && i < state.queue.length - 1) { state.loading = false; renderNow(); renderPlayButton(); return next(); }
+  } finally {
+    if (token === playToken) state.loading = false;
+  }
+  if (token !== playToken) return;
+  renderQueue();
+  renderNow();
+  renderPlayButton();
+}
+
+function next() {
+  if (state.index < state.queue.length - 1) playIndex(state.index + 1);
+  else { state.playing = false; renderPlayButton(); }
+}
+function prev() {
+  if (state.index > 0) playIndex(state.index - 1);
+}
+
+function togglePlay() {
+  const p = currentProvider();
+  if (!p) return;
+  if (state.playing) p.pause(); else p.resume();
+}
+
+// ---------- eventos do provider ----------
+Object.values(providers).forEach((p) => {
+  p.on('playing', (v) => {
+    if (currentProvider() !== p) return;
+    state.playing = v;
+    renderPlayButton();
+  });
+  p.on('progress', (pos, dur) => {
+    if (currentProvider() !== p) return;
+    state.duration = dur || state.duration;
+    if (!state.seeking && state.duration) {
+      $('seek').value = Math.round((pos / state.duration) * 1000);
+      fillRange($('seek'));
+    }
+    $('time-pos').textContent = fmt(pos);
+    $('time-dur').textContent = fmt(state.duration);
+  });
+  p.on('end', () => { if (currentProvider() === p) next(); });
+  p.on('error', (msg) => toast(msg));
+});
+
+// ---------- controles ----------
+$('btn-play').addEventListener('click', togglePlay);
+$('btn-next').addEventListener('click', next);
+$('btn-prev').addEventListener('click', prev);
+$('btn-clear').addEventListener('click', () => {
+  playToken++;
+  Object.values(providers).forEach((p) => p.pause());
+  state.queue = [];
+  state.index = -1;
+  state.playing = false;
+  state.loading = false;
+  renderQueue(); renderNow(); renderPlayButton();
+});
+
+$('seek').addEventListener('input', () => {
+  state.seeking = true;
+  $('time-pos').textContent = fmt((Number($('seek').value) / 1000) * state.duration);
+  fillRange($('seek'));
+});
+$('seek').addEventListener('change', () => {
+  const p = currentProvider();
+  if (p && state.duration) p.seek((Number($('seek').value) / 1000) * state.duration);
+  state.seeking = false;
+});
+
+$('volume').addEventListener('input', () => {
+  const v = Number($('volume').value) / 100;
+  Object.values(providers).forEach((p) => p.setVolume(v));
+  fillRange($('volume'));
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeMenu();
+  if (e.code === 'Space' && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) {
+    e.preventDefault();
+    togglePlay();
+  }
+});
+
+// ---------- abas ----------
+const TABS = ['search', 'playlists'];
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelector('.tabs').dataset.active = name;
+  TABS.forEach((n) => ($('tab-' + n).hidden = n !== name));
+}
+document.querySelectorAll('.tab').forEach((btn) => {
+  btn.addEventListener('click', () => showTab(btn.dataset.tab));
+});
+
+// ---------- busca no Soulseek ----------
+let searching = false;
+
+function setSearchStatus(text) {
+  const p = $('search-status');
+  p.textContent = text;
+  p.hidden = !text;
+}
+
+async function doSearch() {
+  const q = $('search-input').value.trim();
+  if (!q || searching) return;
+  searching = true;
+  $('btn-search').disabled = true;
+  $('results').replaceChildren();
+  setSearchStatus('Buscando na rede Soulseek…');
+  try {
+    const tracks = await providers.soulseek.search(q, (files, users) =>
+      setSearchStatus('Buscando… ' + files + ' arquivos de ' + users + ' usuários')
+    );
+    if (!tracks.length) {
+      setSearchStatus('Nenhum arquivo de áudio encontrado para "' + q + '". Tente outras palavras.');
+      return;
+    }
+    setSearchStatus(tracks.length + ' resultados, com os de download mais rápido primeiro.');
+    const ul = $('results');
+    tracks.forEach((t) =>
+      ul.append(
+        trackItem(t, [
+          iconBtn('Baixar e tocar agora', '▶', () => addToQueue(t, true)),
+          iconBtn('Adicionar à fila', '+', () => addToQueue(t)),
+          playlistBtn(t)
+        ])
+      )
+    );
+    stagger(ul);
+  } catch (e) {
+    setSearchStatus('');
+    toast(e.message);
+  } finally {
+    searching = false;
+    $('btn-search').disabled = false;
+  }
+}
+$('btn-search').addEventListener('click', doSearch);
+$('search-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
+
+// ---------- playlists ----------
+function createPlaylist(name, tracks = []) {
+  name = (name || '').trim();
+  if (!name) { toast('Dê um nome para a playlist.', 4000); return null; }
+  const seen = new Set();
+  const unique = tracks.map(slimTrack).filter((t) => !seen.has(trackKey(t)) && seen.add(trackKey(t)));
+  const pl = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name, tracks: unique };
+  playlists.push(pl);
+  savePlaylists();
+  renderPlaylists();
+  return pl;
+}
+
+function addToPlaylist(pl, track) {
+  if (pl.tracks.some((t) => trackKey(t) === trackKey(track))) {
+    toast('"' + track.title + '" já está em "' + pl.name + '".', 3000, 'ok');
+    return;
+  }
+  pl.tracks.push(slimTrack(track));
+  savePlaylists();
+  renderPlaylists();
+  if (openPlaylistId === pl.id) renderPlaylistDetail();
+  toast('Adicionada a "' + pl.name + '".', 2500, 'ok');
+}
+
+function playPlaylist(pl, start = 0) {
+  if (!pl.tracks.length) { toast('A playlist está vazia.', 3000); return; }
+  state.queue = pl.tracks.map((t) => ({ ...t }));
+  state.index = -1;
+  document.body.classList.add('queue-open');
+  renderQueue(true);
+  playIndex(start);
+}
+
+function renderPlaylists() {
+  const ul = $('pl-list');
+  ul.replaceChildren();
+  ul.classList.add('still');
+  $('pl-empty').hidden = playlists.length > 0;
+  playlists.forEach((pl) => {
+    const n = pl.tracks.length;
+    ul.append(
+      el('li', { class: 'pl-row' },
+        el('button', { class: 'pl-open', onclick: () => openPlaylist(pl.id) },
+          el('span', { class: 'pl-name' }, pl.name),
+          el('span', { class: 'pl-count' }, n + (n === 1 ? ' faixa' : ' faixas'))),
+        el('div', { class: 'actions' }, iconBtn('Tocar playlist', '▶', () => playPlaylist(pl))))
+    );
+  });
+  stagger(ul);
+}
+
+function openPlaylist(id) {
+  openPlaylistId = id;
+  confirmDeleteId = null;
+  $('pl-home').hidden = true;
+  $('pl-detail').hidden = false;
+  renderPlaylistDetail();
+}
+
+function closePlaylist() {
+  openPlaylistId = null;
+  confirmDeleteId = null;
+  $('pl-home').hidden = false;
+  $('pl-detail').hidden = true;
+  renderPlaylists();
+}
+
+function renderPlaylistDetail() {
+  const pl = playlists.find((p) => p.id === openPlaylistId);
+  if (!pl) { closePlaylist(); return; }
+  $('pl-title').value = pl.name;
+  $('btn-pl-delete').textContent = confirmDeleteId === pl.id ? 'Confirmar exclusão' : 'Excluir playlist';
+  const ul = $('pl-tracks');
+  ul.replaceChildren();
+  ul.classList.add('still');
+  $('pl-tracks-empty').hidden = pl.tracks.length > 0;
+  pl.tracks.forEach((t, i) => {
+    ul.append(
+      trackItem(t, [
+        iconBtn('Tocar a partir daqui', '▶', () => playPlaylist(pl, i)),
+        iconBtn('Adicionar à fila', '+', () => addToQueue(t)),
+        iconBtn('Remover da playlist', '✕', () => {
+          pl.tracks.splice(i, 1);
+          savePlaylists();
+          renderPlaylistDetail();
+        })
+      ])
+    );
+  });
+  stagger(ul);
+}
+
+$('btn-pl-create').addEventListener('click', () => {
+  const pl = createPlaylist($('pl-name').value);
+  if (pl) {
+    $('pl-name').value = '';
+    toast('Playlist "' + pl.name + '" criada.', 2500, 'ok');
+    openPlaylist(pl.id);
+  }
+});
+$('pl-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btn-pl-create').click(); });
+
+$('btn-pl-from-queue').addEventListener('click', () => {
+  if (!state.queue.length) { toast('A fila está vazia.', 3000); return; }
+  const pl = createPlaylist($('pl-name').value, state.queue);
+  if (pl) {
+    $('pl-name').value = '';
+    toast('Fila salva em "' + pl.name + '".', 2500, 'ok');
+    openPlaylist(pl.id);
+  }
+});
+
+const spStatus = (m) => { const s = $('pl-spotify-status'); s.hidden = !m; s.textContent = m || ''; };
+let spNames = {};
+window.api.onSpotifyProgress((m) => spStatus(m));
+
+$('btn-pl-spotify').addEventListener('click', async () => {
+  const btn = $('btn-pl-spotify');
+  btn.disabled = true;
+  $('sp-picker').hidden = true;
+  spStatus('Iniciando…');
+  try {
+    const r = await window.api.spotifyList();
+    if (!r.ok) { spStatus(r.error); return; }
+    spNames = {};
+    const ul = $('sp-list');
+    ul.replaceChildren();
+    r.playlists.forEach((p) => {
+      spNames[p.id] = p.name;
+      const meta = [p.total != null ? p.total + ' faixas' : '', p.isPublic ? 'pública' : 'privada', p.owner && p.id !== '__liked__' ? 'de ' + p.owner : '']
+        .filter(Boolean).join(' · ');
+      ul.append(el('li', {},
+        el('label', {},
+          el('input', { type: 'checkbox', value: p.id }),
+          el('span', { class: 'sp-name', title: p.name }, p.name),
+          el('span', { class: 'sp-meta' }, meta))));
+    });
+    spStatus(r.playlists.length ? '' : 'Nenhuma playlist encontrada nessa conta.');
+    $('sp-picker').hidden = !r.playlists.length;
+  } catch (e) {
+    spStatus(e.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$('sp-all').addEventListener('click', () => {
+  const boxes = [...$('sp-list').querySelectorAll('input')];
+  const all = boxes.every((b) => b.checked);
+  boxes.forEach((b) => { b.checked = !all; });
+});
+$('sp-cancel').addEventListener('click', () => { $('sp-picker').hidden = true; spStatus(''); });
+
+$('sp-go').addEventListener('click', async () => {
+  const ids = [...$('sp-list').querySelectorAll('input:checked')].map((b) => b.value);
+  if (!ids.length) { spStatus('Marque pelo menos uma playlist.'); return; }
+  $('sp-go').disabled = true;
+  try {
+    const r = await window.api.spotifyFetch({ ids, names: spNames });
+    if (!r.ok) { spStatus(r.error); return; }
+    let added = 0;
+    r.playlists.forEach((p) => {
+      const tracks = p.tracks.map((t) => ({
+        source: 'soulseek', id: 'sp:' + t.id, pending: true, title: t.title, artist: t.artist,
+        detail: 'Do Spotify', duration: t.duration
+      }));
+      let pl = playlists.find((x) => x.name === p.name);
+      if (!pl) {
+        pl = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: p.name, tracks: [] };
+        playlists.push(pl);
+      }
+      const have = new Set(pl.tracks.map(trackKey));
+      tracks.forEach((t) => { if (!have.has(trackKey(t))) { pl.tracks.push(slimTrack(t)); added++; } });
+    });
+    savePlaylists();
+    renderPlaylists();
+    $('sp-picker').hidden = true;
+    let msg = r.playlists.length + ' playlist(s) importada(s) (' + added + ' faixas). Cada música é procurada no Soulseek quando você toca.';
+    if (r.skipped && r.skipped.length) {
+      msg += '\nO Spotify não liberou: ' + r.skipped.slice(0, 5).join(', ') + (r.skipped.length > 5 ? '…' : '') + '.';
+    }
+    spStatus(msg);
+  } catch (e) {
+    spStatus(e.message);
+  } finally {
+    $('sp-go').disabled = false;
+  }
+});
+
+$('btn-pl-back').addEventListener('click', closePlaylist);
+$('btn-pl-play').addEventListener('click', () => {
+  const pl = playlists.find((p) => p.id === openPlaylistId);
+  if (pl) playPlaylist(pl);
+});
+$('pl-title').addEventListener('change', () => {
+  const pl = playlists.find((p) => p.id === openPlaylistId);
+  if (!pl) return;
+  const name = $('pl-title').value.trim();
+  if (name) { pl.name = name; savePlaylists(); } else { $('pl-title').value = pl.name; }
+});
+$('btn-pl-delete').addEventListener('click', () => {
+  const pl = playlists.find((p) => p.id === openPlaylistId);
+  if (!pl) return;
+  if (confirmDeleteId === pl.id) {
+    playlists = playlists.filter((p) => p.id !== pl.id);
+    savePlaylists();
+    closePlaylist();
+    return;
+  }
+  confirmDeleteId = pl.id;
+  renderPlaylistDetail();
+  setTimeout(() => {
+    if (confirmDeleteId === pl.id) { confirmDeleteId = null; if (openPlaylistId === pl.id) renderPlaylistDetail(); }
+  }, 4000);
+});
+
+// menu "adicionar à playlist"
+function closeMenu() {
+  const m = document.getElementById('pl-menu');
+  if (m) m.remove();
+}
+
+function pickPlaylist(track, anchor) {
+  closeMenu();
+  const menu = el('div', { id: 'pl-menu', class: 'menu', role: 'menu' });
+  if (!playlists.length) menu.append(el('div', { class: 'menu-empty' }, 'Nenhuma playlist ainda.'));
+  playlists.forEach((pl) =>
+    menu.append(
+      el('button', { class: 'menu-item', role: 'menuitem', onclick: () => { addToPlaylist(pl, track); closeMenu(); } }, pl.name)
+    )
+  );
+  const input = el('input', { type: 'text', class: 'menu-input', placeholder: 'Nova playlist' });
+  const create = () => {
+    const pl = createPlaylist(input.value, [track]);
+    if (pl) { closeMenu(); toast('Playlist "' + pl.name + '" criada com a música.', 2500, 'ok'); }
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') create();
+    if (e.key === 'Escape') closeMenu();
+  });
+  menu.append(el('div', { class: 'menu-new' }, input, el('button', { class: 'primary small', onclick: create }, 'Criar')));
+  document.body.append(menu);
+
+  const r = anchor.getBoundingClientRect();
+  const w = menu.offsetWidth;
+  const h = menu.offsetHeight;
+  menu.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w)) + 'px';
+  const below = r.bottom + 6;
+  menu.style.top = (below + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 6) : below) + 'px';
+}
+
+document.addEventListener('mousedown', (e) => {
+  if (!e.target.closest('#pl-menu') && !e.target.closest('[data-pl-btn]')) closeMenu();
+});
+
+// ---------- aparência: imagem de fundo e transparência ----------
+function setBackground(url) {
+  $('bg').style.backgroundImage = url ? 'url("' + url + '")' : '';
+}
+
+function applyAlpha(v) {
+  document.documentElement.style.setProperty('--panel-alpha', (Number(v) / 100).toFixed(2));
+}
+
+$('btn-bg').addEventListener('click', async () => {
+  try {
+    const url = await window.api.bgChoose();
+    if (url) setBackground(url);
+  } catch (e) {
+    toast(e.message);
+  }
+});
+
+const savedAlpha = store.get('panelAlpha', 34);
+$('alpha').value = savedAlpha;
+applyAlpha(savedAlpha);
+fillRange($('alpha'));
+$('alpha').addEventListener('input', () => {
+  applyAlpha($('alpha').value);
+  fillRange($('alpha'));
+  store.set('panelAlpha', Number($('alpha').value));
+});
+
+$('btn-logout').addEventListener('click', () => window.api.authLogout());
+
+// ---------- gaveta da fila e contador ----------
+function setQueueCount(n) {
+  const b = $('queue-count');
+  if (b.textContent !== String(n)) {
+    b.textContent = n;
+    b.classList.remove('bump');
+    void b.offsetWidth;
+    b.classList.add('bump');
+  }
+}
+$('btn-queue').addEventListener('click', () => document.body.classList.toggle('queue-open'));
+
+// ---------- fundo que acompanha o mouse ----------
+window.addEventListener('mousemove', (e) => {
+  const root = document.documentElement.style;
+  root.setProperty('--mx', (e.clientX / window.innerWidth - 0.5).toFixed(3));
+  root.setProperty('--my', (e.clientY / window.innerHeight - 0.5).toFixed(3));
+});
+
+// ---------- início ----------
+(function init() {
+  renderQueue();
+  renderPlaylists();
+  fillRange($('seek'));
+  fillRange($('volume'));
+  window.api.bgGet().then(setBackground).catch(() => {});
+})();

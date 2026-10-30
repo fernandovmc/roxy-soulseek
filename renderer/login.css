@@ -1,0 +1,25 @@
+* { box-sizing:border-box; }
+html,body { height:100%; margin:0; background:#fff; color:#111;
+  font-family:Inter,"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif; font-size:14px; }
+[hidden] { display:none!important; }
+.wrap { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); height:100%; }
+.left { display:flex; flex-direction:column; justify-content:center; padding:0 clamp(32px,6vw,84px); min-width:0; }
+.logo { margin:0 0 38px; font-size:clamp(76px,12vw,160px); font-weight:800; letter-spacing:-.065em; line-height:.88; }
+form { display:flex; flex-direction:column; gap:12px; max-width:360px; }
+input[type="text"],input[type="password"] {
+  padding:14px 16px; border:1px solid #d9d9d9; border-radius:12px; background:#fafafa; font:inherit; outline:none;
+  transition:border-color .15s,background .15s;
+}
+input[type="text"]:focus,input[type="password"]:focus { border-color:#111; background:#fff; }
+.remember { display:flex; align-items:center; gap:8px; color:#555; font-size:13px; cursor:pointer; }
+.remember input { accent-color:#111; width:15px; height:15px; }
+button { font:inherit; cursor:pointer; }
+#go { padding:14px 16px; border:0; border-radius:12px; background:#111; color:#fff; font-weight:650; transition:opacity .15s,transform .15s; }
+#go:hover { transform:translateY(-1px); }
+#go:disabled { opacity:.45; cursor:wait; transform:none; }
+.link { background:none; border:0; padding:6px 0; color:#555; font-size:13px; text-decoration:underline; }
+.status { min-height:20px; margin:16px 0 0; max-width:360px; color:#555; line-height:1.5; }
+.status.error { color:#c0392b; }
+.foot { margin:auto 0 0; padding:0 0 28px; color:#999; font-size:12px; max-width:360px; }
+.left { padding-top:28px; }
+.photo { background:#fff url("login-photo.jpg") center top/cover no-repeat; }

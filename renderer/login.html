@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data:; style-src 'self'; script-src 'self'">
+  <title>Roxy</title>
+  <link rel="stylesheet" href="login.css">
+</head>
+<body>
+  <main class="wrap">
+    <section class="left">
+      <h1 class="logo">Roxy</h1>
+
+      <form id="form" autocomplete="off">
+        <input id="user" type="text" placeholder="Usuário do Soulseek" required>
+        <input id="pass" type="password" placeholder="Senha" required>
+        <label class="remember"><input id="remember" type="checkbox" checked> Manter conectado</label>
+        <button id="go" type="submit">Entrar</button>
+      </form>
+
+      <div id="auto" hidden>
+        <p id="auto-text" class="status"></p>
+      </div>
+
+      <p id="status" class="status" role="status"></p>
+      <p class="foot">Use sua conta do Soulseek. Se ela não existir, é criada no primeiro login.</p>
+    </section>
+    <aside class="photo" aria-hidden="true"></aside>
+  </main>
+  <script src="login.js"></script>
+</body>
+</html>

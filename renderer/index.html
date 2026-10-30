@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Roxy</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="bg" aria-hidden="true"></div>
+  <div class="veil" aria-hidden="true"></div>
+
+  <header class="top">
+    <div class="brand">
+      <img class="brand-icon" src="icon.png" alt="">
+      <span class="brand-name">Roxy</span>
+    </div>
+    <div class="top-actions">
+      <button id="btn-queue" class="chip" type="button">Fila <b id="queue-count">0</b></button>
+      <button id="btn-logout" class="chip" type="button">Sair</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="lib glass">
+      <div class="tabs" data-active="search" role="tablist">
+        <span class="tab-ind"></span>
+        <button class="tab active" data-tab="search" role="tab">Buscar</button>
+        <button class="tab" data-tab="playlists" role="tab">Playlists</button>
+      </div>
+
+      <div id="tab-search" class="tab-body">
+        <div class="field">
+          <input id="search-input" type="search" placeholder="Música, artista ou álbum" autocomplete="off">
+          <button id="btn-search" class="primary">Buscar</button>
+        </div>
+        <p id="search-status" class="hint" hidden></p>
+        <ul id="results" class="list"></ul>
+      </div>
+
+      <div id="tab-playlists" class="tab-body" hidden>
+        <div id="pl-home" class="pl-home">
+          <div class="field">
+            <input id="pl-name" type="text" placeholder="Nome da nova playlist" autocomplete="off">
+            <button id="btn-pl-create" class="primary">Criar</button>
+          </div>
+          <div class="row-actions">
+            <button id="btn-pl-from-queue" class="link">Salvar a fila</button>
+            <button id="btn-pl-spotify" class="primary small">Importar do Spotify</button>
+          </div>
+          <p id="pl-spotify-status" class="hint" hidden></p>
+          <div id="sp-picker" class="sp-picker" hidden>
+            <div class="sp-head">
+              <strong>Escolha o que importar</strong>
+              <button id="sp-all" class="link" type="button">Selecionar tudo</button>
+            </div>
+            <ul id="sp-list" class="sp-list"></ul>
+            <div class="pl-actions">
+              <button id="sp-go" class="primary small" type="button">Importar selecionadas</button>
+              <button id="sp-cancel" class="link" type="button">Cancelar</button>
+            </div>
+          </div>
+          <ul id="pl-list" class="list"></ul>
+          <p id="pl-empty" class="empty">Nenhuma playlist ainda. Crie uma acima e adicione faixas com o botão ♫.</p>
+        </div>
+        <div id="pl-detail" class="pl-detail" hidden>
+          <button id="btn-pl-back" class="link">‹ Todas as playlists</button>
+          <input id="pl-title" class="title-input" type="text" aria-label="Nome da playlist">
+          <div class="pl-actions">
+            <button id="btn-pl-play" class="primary small">Tocar playlist</button>
+            <button id="btn-pl-delete" class="link">Excluir playlist</button>
+          </div>
+          <ul id="pl-tracks" class="list"></ul>
+          <p id="pl-tracks-empty" class="empty">Playlist vazia. Use o botão ♫ nas músicas para adicionar.</p>
+        </div>
+      </div>
+
+      <div class="look">
+        <button id="btn-bg" class="link">Trocar fundo</button>
+        <label class="alpha">Vidro <input id="alpha" type="range" min="10" max="90" value="34"></label>
+      </div>
+    </section>
+
+    <aside class="drawer glass" aria-label="Fila de reprodução">
+      <header>
+        <h2>Fila</h2>
+        <button id="btn-clear" class="link">Limpar</button>
+      </header>
+      <ul id="queue" class="list"></ul>
+      <p id="queue-empty" class="empty">A fila está vazia. Busque uma música ou toque uma playlist.</p>
+    </aside>
+  </main>
+
+  <footer class="bar glass">
+    <div class="now">
+      <img id="now-art" class="disc" src="icon.png" alt="">
+      <div class="now-text">
+        <div class="now-row">
+          <div id="now-title" class="now-title">Nada tocando</div>
+          <span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        </div>
+        <div id="now-artist" class="now-artist"></div>
+      </div>
+    </div>
+    <div class="buttons">
+      <button id="btn-prev" aria-label="Anterior">⏮</button>
+      <button id="btn-play" class="play" aria-label="Tocar">▶</button>
+      <button id="btn-next" aria-label="Próxima">⏭</button>
+    </div>
+    <div class="seek">
+      <span id="time-pos">0:00</span>
+      <input id="seek" type="range" min="0" max="1000" value="0" aria-label="Posição">
+      <span id="time-dur">0:00</span>
+    </div>
+    <div class="volume">
+      <input id="volume" type="range" min="0" max="100" value="70" aria-label="Volume">
+    </div>
+  </footer>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+  <audio id="audio" preload="auto"></audio>
+
+  <script src="providers/soulseek.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
