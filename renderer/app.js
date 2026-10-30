@@ -73,8 +73,71 @@ const trackKey = (t) => t.source + ':' + t.id;
 const slimTrack = (t) => ({
   source: t.source, id: t.id, username: t.username, filename: t.filename, size: t.size,
   ext: t.ext, bitrate: t.bitrate, title: t.title, artist: t.artist, detail: t.detail, duration: t.duration,
-  pending: t.pending
+  pending: t.pending, alts: t.alts
 });
+
+// "Minhas músicas" (♥) e "Recentes"
+let saved = store.get('saved', []);
+let recent = store.get('recent', []);
+const RECENT_MAX = 50;
+const isSaved = (t) => saved.some((s) => trackKey(s) === trackKey(t));
+
+function toggleSaved(track) {
+  if (isSaved(track)) saved = saved.filter((s) => trackKey(s) !== trackKey(track));
+  else saved.unshift(slimTrack(track));
+  store.set('saved', saved);
+  renderSaved();
+  renderRecent();
+  renderQueue();
+  return isSaved(track);
+}
+
+function pushRecent(track) {
+  recent = [slimTrack(track), ...recent.filter((t) => trackKey(t) !== trackKey(track))].slice(0, RECENT_MAX);
+  store.set('recent', recent);
+  renderRecent();
+}
+
+// Atualiza o arquivo escolhido (busca do Spotify ou fonte que venceu a corrida) em todo lugar salvo.
+function syncFile(track) {
+  const file = { username: track.username, filename: track.filename, size: track.size, ext: track.ext,
+    bitrate: track.bitrate, detail: track.detail, alts: track.alts, pending: false };
+  const all = [...saved, ...recent, ...playlists.flatMap((pl) => pl.tracks)];
+  all.forEach((t) => { if (trackKey(t) === trackKey(track)) Object.assign(t, file); });
+  savePlaylists();
+  store.set('saved', saved);
+  store.set('recent', recent);
+}
+
+// O cache apaga o que só foi ouvido; músicas salvas e de playlists ficam.
+function pruneCache() {
+  const keep = [...saved, ...playlists.flatMap((pl) => pl.tracks)]
+    .filter((t) => !t.pending && t.filename)
+    .flatMap((t) => [t, ...(t.alts || [])])
+    .map((t) => ({ filename: t.filename, size: t.size }));
+  window.api.cachePrune(keep).catch(() => {});
+}
+
+// Faixa vinda do Spotify só tem título/artista: acha o arquivo no Soulseek (uma vez só por faixa).
+function resolve(track) {
+  if (!track.pending) return Promise.resolve(true);
+  track._resolving = track._resolving || providers.soulseek.findBest(track).then((hit) => {
+    if (!hit) return false;
+    Object.assign(track, { username: hit.username, filename: hit.filename, size: hit.size, ext: hit.ext,
+      bitrate: hit.bitrate, detail: hit.detail, alts: hit.alts, pending: false });
+    syncFile(track);
+    return true;
+  }).finally(() => { delete track._resolving; });
+  return track._resolving;
+}
+
+// Pré-carga: enquanto uma toca, as próximas da fila já vão baixando.
+const PREFETCH = 2;
+function prefetch(from) {
+  state.queue.slice(from, from + PREFETCH).forEach(async (t) => {
+    try { if (await resolve(t)) await providers.soulseek.fetch(t); } catch {}
+  });
+}
 
 // ---------- itens de lista ----------
 function trackItem(track, actions, extraClass = '', loading = false) {
@@ -101,6 +164,42 @@ function playlistBtn(track) {
   return iconBtn('Adicionar à playlist', '♫', (e) => pickPlaylist(track, e.currentTarget), { 'data-pl-btn': '' });
 }
 
+function heartBtn(track) {
+  const on = isSaved(track);
+  const b = iconBtn(on ? 'Tirar de Minhas músicas' : 'Salvar em Minhas músicas', on ? '♥' : '♡', () => {
+    const now = toggleSaved(track);
+    b.textContent = now ? '♥' : '♡';
+    b.classList.toggle('on', now);
+    b.title = b.ariaLabel = now ? 'Tirar de Minhas músicas' : 'Salvar em Minhas músicas';
+  }, { class: on ? 'on' : '' });
+  return b;
+}
+
+// lista simples de faixas (Minhas músicas / Recentes): tocar a partir daqui, fila, playlist, ♥
+function renderTrackList(ul, empty, tracks) {
+  ul.replaceChildren();
+  ul.classList.add('still');
+  empty.hidden = tracks.length > 0;
+  tracks.forEach((t, i) =>
+    ul.append(trackItem(t, [
+      iconBtn('Tocar a partir daqui', '▶', () => playTracks(tracks, i)),
+      iconBtn('Adicionar à fila', '+', () => addToQueue(t)),
+      playlistBtn(t),
+      heartBtn(t)
+    ])));
+  stagger(ul);
+}
+const renderSaved = () => renderTrackList($('saved-list'), $('saved-empty'), saved);
+function renderRecent() {
+  renderTrackList($('recent-list'), $('recent-empty'), recent);
+  $('btn-recent-clear').hidden = !recent.length;
+}
+$('btn-recent-clear').addEventListener('click', () => {
+  recent = [];
+  store.set('recent', recent);
+  renderRecent();
+});
+
 function renderQueue(animate = false) {
   const ul = $('queue');
   ul.replaceChildren();
@@ -112,6 +211,7 @@ function renderQueue(animate = false) {
         [
           iconBtn('Tocar', '▶', () => playIndex(i)),
           playlistBtn(track),
+          heartBtn(track),
           iconBtn('Remover da fila', '✕', () => removeAt(i))
         ],
         i === state.index ? 'current' : '',
@@ -186,24 +286,23 @@ async function playIndex(i) {
   try {
     if (track.pending) {
       $('now-artist').textContent = 'Procurando no Soulseek…';
-      const hit = await providers.soulseek.findBest(track);
+      const found = await resolve(track);
       if (token !== playToken) return;
-      if (!hit) {
+      if (!found) {
         const miss = new Error('Não achei "' + track.title + '" no Soulseek. Pulando…');
         miss.notFound = true;
         throw miss;
       }
-      const found = { username: hit.username, filename: hit.filename, size: hit.size, ext: hit.ext,
-        bitrate: hit.bitrate, detail: hit.detail, pending: false };
-      Object.assign(track, found);
-      playlists.forEach((pl) => pl.tracks.forEach((t) => { if (t.id === track.id && t.pending) Object.assign(t, found); }));
-      savePlaylists();
     }
     await providers[track.source].play(track, (text) => {
       if (token === playToken) $('now-artist').textContent = text;
     });
     if (token !== playToken) return;
     state.playing = true;
+    syncFile(track);
+    pushRecent(track);
+    pruneCache();
+    prefetch(i + 1);
   } catch (e) {
     if (token !== playToken) return;
     state.playing = false;
@@ -293,7 +392,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ---------- abas ----------
-const TABS = ['search', 'playlists'];
+const TABS = ['search', 'saved', 'recent', 'playlists'];
 function showTab(name) {
   document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelector('.tabs').dataset.active = name;
@@ -334,7 +433,8 @@ async function doSearch() {
         trackItem(t, [
           iconBtn('Baixar e tocar agora', '▶', () => addToQueue(t, true)),
           iconBtn('Adicionar à fila', '+', () => addToQueue(t)),
-          playlistBtn(t)
+          playlistBtn(t),
+          heartBtn(t)
         ])
       )
     );
@@ -377,7 +477,11 @@ function addToPlaylist(pl, track) {
 
 function playPlaylist(pl, start = 0) {
   if (!pl.tracks.length) { toast('A playlist está vazia.', 3000); return; }
-  state.queue = pl.tracks.map((t) => ({ ...t }));
+  playTracks(pl.tracks, start);
+}
+
+function playTracks(tracks, start = 0) {
+  state.queue = tracks.map((t) => ({ ...t }));
   state.index = -1;
   document.body.classList.add('queue-open');
   renderQueue(true);
@@ -432,6 +536,7 @@ function renderPlaylistDetail() {
       trackItem(t, [
         iconBtn('Tocar a partir daqui', '▶', () => playPlaylist(pl, i)),
         iconBtn('Adicionar à fila', '+', () => addToQueue(t)),
+        heartBtn(t),
         iconBtn('Remover da playlist', '✕', () => {
           pl.tracks.splice(i, 1);
           savePlaylists();
@@ -511,34 +616,58 @@ $('sp-go').addEventListener('click', async () => {
   try {
     const r = await window.api.spotifyFetch({ ids, names: spNames });
     if (!r.ok) { spStatus(r.error); return; }
-    let added = 0;
-    r.playlists.forEach((p) => {
-      const tracks = p.tracks.map((t) => ({
-        source: 'soulseek', id: 'sp:' + t.id, pending: true, title: t.title, artist: t.artist,
-        detail: 'Do Spotify', duration: t.duration
-      }));
-      let pl = playlists.find((x) => x.name === p.name);
-      if (!pl) {
-        pl = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: p.name, tracks: [] };
-        playlists.push(pl);
-      }
-      const have = new Set(pl.tracks.map(trackKey));
-      tracks.forEach((t) => { if (!have.has(trackKey(t))) { pl.tracks.push(slimTrack(t)); added++; } });
-    });
-    savePlaylists();
-    renderPlaylists();
     $('sp-picker').hidden = true;
-    let msg = r.playlists.length + ' playlist(s) importada(s) (' + added + ' faixas). Cada música é procurada no Soulseek quando você toca.';
-    if (r.skipped && r.skipped.length) {
-      msg += '\nO Spotify não liberou: ' + r.skipped.slice(0, 5).join(', ') + (r.skipped.length > 5 ? '…' : '') + '.';
-    }
-    spStatus(msg);
+    importSpotify(r);
   } catch (e) {
     spStatus(e.message);
   } finally {
     $('sp-go').disabled = false;
   }
 });
+
+function importSpotify(r) {
+  let added = 0;
+  r.playlists.forEach((p) => {
+    const tracks = p.tracks.map((t) => ({
+      source: 'soulseek', id: 'sp:' + t.id, pending: true, title: t.title, artist: t.artist,
+      detail: 'Do Spotify', duration: t.duration
+    }));
+    let pl = playlists.find((x) => x.name === p.name);
+    if (!pl) {
+      pl = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: p.name, tracks: [] };
+      playlists.push(pl);
+    }
+    const have = new Set(pl.tracks.map(trackKey));
+    tracks.forEach((t) => { if (!have.has(trackKey(t))) { pl.tracks.push(slimTrack(t)); added++; } });
+  });
+  savePlaylists();
+  renderPlaylists();
+  let msg = r.playlists.length + ' playlist(s) importada(s) (' + added + ' faixas). Cada música é procurada no Soulseek quando você toca.';
+  if (r.capped) msg += '\nPelo link vêm no máximo 100 faixas; para a playlist inteira, use "Minhas playlists do Spotify" (com login).';
+  if (r.skipped && r.skipped.length) {
+    msg += '\nO Spotify não liberou: ' + r.skipped.slice(0, 5).join(', ') + (r.skipped.length > 5 ? '…' : '') + '.';
+  }
+  spStatus(msg);
+}
+
+async function importSpotifyLink() {
+  const link = $('sp-link').value.trim();
+  if (!link) return;
+  $('btn-sp-link').disabled = true;
+  spStatus('Lendo o link do Spotify…');
+  try {
+    const r = await window.api.spotifyPublic(link);
+    if (!r.ok) { spStatus(r.error); return; }
+    $('sp-link').value = '';
+    importSpotify(r);
+  } catch (e) {
+    spStatus(e.message);
+  } finally {
+    $('btn-sp-link').disabled = false;
+  }
+}
+$('btn-sp-link').addEventListener('click', importSpotifyLink);
+$('sp-link').addEventListener('keydown', (e) => { if (e.key === 'Enter') importSpotifyLink(); });
 
 $('btn-pl-back').addEventListener('click', closePlaylist);
 $('btn-pl-play').addEventListener('click', () => {
@@ -659,6 +788,8 @@ window.addEventListener('mousemove', (e) => {
 (function init() {
   renderQueue();
   renderPlaylists();
+  renderSaved();
+  renderRecent();
   fillRange($('seek'));
   fillRange($('volume'));
   window.api.bgGet().then(setBackground).catch(() => {});

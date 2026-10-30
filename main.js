@@ -107,6 +107,16 @@ async function slskRequest({ method, path: apiPath, body }) {
 const foundCache = new Map();
 const baseName = (p) => String(p).split(/[\\/]/).pop();
 
+function walkFiles(dir, fn, depth = 0) {
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  for (const e of entries) {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) { if (depth < 6) walkFiles(full, fn, depth + 1); }
+    else fn(full, e.name);
+  }
+}
+
 function findLocal(track) {
   const key = track.username + '|' + track.filename;
   const cached = foundCache.get(key);
@@ -115,24 +125,56 @@ function findLocal(track) {
   const want = baseName(track.filename).toLowerCase();
   let best = null;
   let bestTime = 0;
-  const walk = (dir, depth) => {
-    let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const e of entries) {
-      const full = path.join(dir, e.name);
-      if (e.isDirectory()) {
-        if (depth < 6) walk(full, depth + 1);
-      } else if (e.name.toLowerCase() === want) {
-        try {
-          const st = fs.statSync(full);
-          if ((!track.size || st.size === track.size) && st.mtimeMs > bestTime) { best = full; bestTime = st.mtimeMs; }
-        } catch {}
-      }
-    }
-  };
-  walk(settings.downloadsDir, 0);
+  walkFiles(settings.downloadsDir, (full, name) => {
+    if (name.toLowerCase() !== want) return;
+    try {
+      const st = fs.statSync(full);
+      if ((!track.size || st.size === track.size) && st.mtimeMs > bestTime) { best = full; bestTime = st.mtimeMs; }
+    } catch {}
+  });
   if (best) foundCache.set(key, best);
   return best;
+}
+
+// ---------- cache: o que só foi ouvido some sozinho; salvas (♥) e de playlists ficam ----------
+const CACHE_LIMIT = 5 * 1024 ** 3;
+
+function pruneCache(keep) {
+  const keepSet = new Set((Array.isArray(keep) ? keep : []).map((t) => baseName(t.filename).toLowerCase() + '|' + t.size));
+  const files = [];
+  let total = 0;
+  walkFiles(settings.downloadsDir, (full, name) => {
+    try {
+      const st = fs.statSync(full);
+      if (keepSet.has(name.toLowerCase() + '|' + st.size)) return; // salvas não contam no limite
+      files.push({ full, size: st.size, t: st.mtimeMs });
+      total += st.size;
+    } catch {}
+  });
+  files.sort((a, b) => a.t - b.t); // ouvidas há mais tempo saem primeiro (o play atualiza a data)
+  for (const f of files) {
+    if (total <= CACHE_LIMIT) break;
+    try { fs.unlinkSync(f.full); total -= f.size; } catch {}
+  }
+}
+
+// ---------- playlist/álbum público do Spotify pelo link (sem login) ----------
+async function spotifyPublic(link) {
+  const m = String(link || '').match(/(playlist|album)[/:]([A-Za-z0-9]{22})/);
+  if (!m) throw new Error('Cole o link de uma playlist ou álbum do Spotify.');
+  const r = await fetch('https://open.spotify.com/embed/' + m[1] + '/' + m[2], {
+    headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(20000)
+  });
+  if (!r.ok) throw new Error('O Spotify não abriu esse link (erro ' + r.status + '). Ele é público?');
+  const j = (await r.text()).match(/<script id="__NEXT_DATA__"[^>]*>(.*?)<\/script>/s);
+  let e = null;
+  try { e = JSON.parse(j[1]).props.pageProps.state.data.entity; } catch {}
+  if (!e || !Array.isArray(e.trackList)) throw new Error('Não consegui ler esse link. A playlist é pública?');
+  // Limite conhecido: a página de embed traz no máximo 100 faixas; para mais, use o import com login.
+  const tracks = e.trackList.filter((t) => t && t.title).map((t) => ({
+    id: String(t.uri || '').split(':').pop() || t.title, title: t.title, artist: t.subtitle || '', duration: t.duration || undefined
+  }));
+  return { playlists: [{ name: e.name || e.title || 'Spotify', tracks }], skipped: [], capped: tracks.length >= 100 };
 }
 
 // ---------- imagem de fundo ----------
@@ -561,8 +603,12 @@ app.whenReady().then(() => {
   ipcMain.handle('slsk:request', (_e, req) => slskRequest(req || {}));
   ipcMain.handle('slsk:find', (_e, track) => {
     const f = findLocal(track || {});
+    if (f) { try { const now = new Date(); fs.utimesSync(f, now, now); } catch {} }
     return f ? pathToFileURL(f).href : null;
   });
+  ipcMain.handle('cache:prune', (_e, keep) => pruneCache(keep));
+  ipcMain.handle('spotify:public', (_e, link) =>
+    spotifyGuard(() => spotifyPublic(link)));
   ipcMain.handle('slsk:pickFolder', async () => {
     const r = await dialog.showOpenDialog({ title: 'Pasta de downloads do slskd', properties: ['openDirectory'] });
     return r.canceled ? null : r.filePaths[0];
