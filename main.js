@@ -158,6 +158,26 @@ function pruneCache(keep) {
   }
 }
 
+// ---------- capa pelo Deezer (sem chave) ----------
+const artCache = new Map();
+async function artLookup(query) {
+  const q = String(query || '').trim().slice(0, 200);
+  if (!q) return null;
+  if (artCache.has(q)) return artCache.get(q);
+  let art = null;
+  try {
+    const r = await fetch('https://api.deezer.com/search?limit=1&q=' + encodeURIComponent(q), { signal: AbortSignal.timeout(10000) });
+    const hit = r.ok && (await r.json()).data?.[0];
+    if (hit && hit.album) {
+      art = { s: hit.album.cover_medium, l: hit.album.cover_xl, artist: hit.artist && hit.artist.name, title: hit.title };
+    }
+  } catch {
+    return null; // falha de rede não entra no cache
+  }
+  artCache.set(q, art);
+  return art;
+}
+
 // ---------- playlist/álbum público do Spotify pelo link (sem login) ----------
 async function spotifyPublic(link) {
   const m = String(link || '').match(/(playlist|album)[/:]([A-Za-z0-9]{22})/);
@@ -607,6 +627,7 @@ app.whenReady().then(() => {
     return f ? pathToFileURL(f).href : null;
   });
   ipcMain.handle('cache:prune', (_e, keep) => pruneCache(keep));
+  ipcMain.handle('art:lookup', (_e, query) => artLookup(query));
   ipcMain.handle('spotify:public', (_e, link) =>
     spotifyGuard(() => spotifyPublic(link)));
   ipcMain.handle('slsk:pickFolder', async () => {

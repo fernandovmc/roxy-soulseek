@@ -161,6 +161,8 @@ input[type="search"]:focus,input[type="text"]:focus {
   transition:transform .5s var(--spring);
 }
 .item:hover .ph { transform:rotate(-12deg) scale(1.12); }
+.ph img.cover { width:100%; height:100%; border-radius:50%; object-fit:cover; animation:pop .5s var(--spring) both; }
+.ph.has-art { border-color:transparent; }
 .ph.dance { border:0; overflow:visible; }
 .ph.dance img {
   position:absolute; left:50%; bottom:-2px; height:58px; width:auto; translate:-50% 0;

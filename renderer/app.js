@@ -73,8 +73,23 @@ const trackKey = (t) => t.source + ':' + t.id;
 const slimTrack = (t) => ({
   source: t.source, id: t.id, username: t.username, filename: t.filename, size: t.size,
   ext: t.ext, bitrate: t.bitrate, title: t.title, artist: t.artist, detail: t.detail, duration: t.duration,
-  pending: t.pending, alts: t.alts
+  pending: t.pending, alts: t.alts, art: t.art
 });
+
+// Capas: Deezer pelo artista + título, uma consulta por vez e com cache por consulta.
+const artMem = new Map();
+let artChain = Promise.resolve();
+const artQuery = (t) => (String(t.artist || '').split(',')[0] + ' ' + (t.title || '')).trim();
+function ensureArt(t) {
+  if (t.art) return Promise.resolve(t.art);
+  const q = artQuery(t);
+  if (!artMem.has(q)) {
+    const p = artChain.then(() => window.api.artLookup(q)).catch(() => null);
+    artChain = p;
+    artMem.set(q, p);
+  }
+  return artMem.get(q).then((a) => { if (a) t.art = a; return a; });
+}
 
 // "Minhas músicas" (♥) e "Recentes"
 let saved = store.get('saved', []);
@@ -101,7 +116,7 @@ function pushRecent(track) {
 // Atualiza o arquivo escolhido (busca do Spotify ou fonte que venceu a corrida) em todo lugar salvo.
 function syncFile(track) {
   const file = { username: track.username, filename: track.filename, size: track.size, ext: track.ext,
-    bitrate: track.bitrate, detail: track.detail, alts: track.alts, pending: false };
+    bitrate: track.bitrate, detail: track.detail, alts: track.alts, art: track.art, pending: false };
   const all = [...saved, ...recent, ...playlists.flatMap((pl) => pl.tracks)];
   all.forEach((t) => { if (trackKey(t) === trackKey(track)) Object.assign(t, file); });
   savePlaylists();
@@ -144,6 +159,13 @@ function trackItem(track, actions, extraClass = '', loading = false) {
   const art = loading
     ? el('div', { class: 'ph dance' }, el('img', { src: 'dance.webp', alt: '' }))
     : el('div', { class: 'ph' }, track.ext ? track.ext.toUpperCase() : '♪');
+  if (!loading) {
+    ensureArt(track).then((a) => {
+      if (!a || !a.s) return;
+      art.replaceChildren(el('img', { class: 'cover', src: a.s, alt: '' }));
+      art.classList.add('has-art');
+    });
+  }
   const sub = [track.artist, track.detail].filter(Boolean).join(' · ');
   return el(
     'li',

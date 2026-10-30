@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('api', {
   spotifyFetch: (req) => ipcRenderer.invoke('spotify:fetch', req),
   spotifyPublic: (link) => ipcRenderer.invoke('spotify:public', link),
   cachePrune: (keep) => ipcRenderer.invoke('cache:prune', keep),
+  artLookup: (query) => ipcRenderer.invoke('art:lookup', query),
   onSpotifyProgress: (cb) => ipcRenderer.on('spotify:progress', (_e, m) => cb(m)),
   authState: () => ipcRenderer.invoke('auth:state'),
   authLogin: (p) => ipcRenderer.invoke('auth:login', p),
