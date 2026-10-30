@@ -205,6 +205,37 @@ input[type="search"]:focus,input[type="text"]:focus {
 .alpha { display:flex; align-items:center; gap:9px; color:var(--muted); font-size:11px; letter-spacing:.1em; }
 .alpha input { width:90px; }
 
+/* ---------- palco central: letra ou capa girando ---------- */
+.stage {
+  position:fixed; top:68px; bottom:116px; left:428px; right:24px; z-index:5;
+  display:grid; place-items:center; pointer-events:none;
+  transition:right .9s var(--spring), opacity .35s;
+}
+body.queue-open .stage { right:388px; }
+.stage-art {
+  width:min(46vh, 78%); aspect-ratio:1; border-radius:50%; object-fit:cover;
+  box-shadow:0 0 0 1px rgba(255,255,255,.25), 0 30px 90px rgba(0,0,0,.55);
+  animation:pop .8s var(--spring) both;
+}
+.stage-art.spin { animation:spin 24s linear infinite; }
+.lyrics {
+  list-style:none; margin:0; padding:38vh 8px; width:100%; max-height:100%; overflow-y:auto;
+  text-align:center; pointer-events:auto; scrollbar-width:none;
+  -webkit-mask-image:linear-gradient(transparent, #000 22%, #000 78%, transparent);
+  mask-image:linear-gradient(transparent, #000 22%, #000 78%, transparent);
+}
+.lyrics::-webkit-scrollbar { display:none; }
+.lyrics li {
+  padding:9px 12px; font-size:22px; font-weight:300; line-height:1.35; color:rgba(244,246,243,.45);
+  text-shadow:0 2px 16px rgba(0,0,0,.9), 0 0 4px rgba(0,0,0,.6);
+  cursor:pointer; transition:color .4s, transform .6s var(--spring);
+}
+.lyrics li:hover { color:rgba(244,246,243,.7); }
+.lyrics li.on { color:#fff; font-weight:400; transform:scale(1.08); }
+.lyrics.plain { padding:20px 8px; }
+.lyrics.plain li { cursor:default; font-size:17px; color:rgba(244,246,243,.75); }
+@media (max-width:1180px) { body.queue-open .stage { opacity:0; } }
+
 /* ---------- fila (gaveta) ---------- */
 .drawer {
   position:fixed; right:24px; top:68px; bottom:116px; z-index:12;

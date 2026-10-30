@@ -251,9 +251,10 @@ function renderNow() {
   $('now-title').textContent = t ? t.title : 'Nada tocando';
   $('now-artist').textContent = t ? [t.artist, t.detail].filter(Boolean).join(' · ') : '';
   const art = $('now-art');
-  const want = state.loading ? 'dance.webp' : 'icon.png';
+  const want = state.loading ? 'dance.webp' : stage.art || 'icon.png';
   if (art.getAttribute('src') !== want) art.setAttribute('src', want);
   art.className = state.loading ? 'dance' : 'disc' + (state.playing ? ' spin' : '');
+  if (!t) { stage.token++; $('stage').hidden = true; }
 }
 
 function renderPlayButton() {
@@ -262,6 +263,62 @@ function renderPlayButton() {
   b.setAttribute('aria-label', state.playing ? 'Pausar' : 'Tocar');
   document.body.classList.toggle('playing', state.playing);
   $('now-art').classList.toggle('spin', state.playing && !state.loading && !$('now-art').classList.contains('dance'));
+  $('stage-art').classList.toggle('spin', state.playing);
+}
+
+// ---------- palco central: letra sincronizada ou, sem letra, a capa girando ----------
+const stage = { token: 0, art: null, lines: null, idx: -1 };
+
+function setStageArt(url) {
+  stage.art = url || null;
+  $('stage-art').src = url || 'icon.png';
+  renderNow();
+}
+
+async function loadStage(track) {
+  const token = ++stage.token;
+  stage.lines = null;
+  stage.idx = -1;
+  $('stage').hidden = false;
+  $('lyrics').hidden = true;
+  $('lyrics').replaceChildren();
+  $('stage-art').hidden = false;
+
+  // tags do FLAC são as mais confiáveis; senão, o que o Deezer reconheceu; senão, o nome do arquivo
+  const meta = await window.api.trackMeta(track).catch(() => null);
+  const found = await ensureArt(track);
+  if (token !== stage.token) return;
+  setStageArt((meta && meta.picture) || (found && found.l));
+  const artist = (meta && meta.artist) || (found && found.artist) || String(track.artist || '').split(',')[0];
+  const title = (meta && meta.title) || (found && found.title) || track.title;
+
+  const ly = await window.api.lyrics({ artist, title, duration: track.duration || state.duration }).catch(() => null);
+  if (token !== stage.token || !ly || !(ly.synced || ly.plain)) return;
+  const ol = $('lyrics');
+  if (ly.synced) {
+    stage.lines = ly.synced;
+    ly.synced.forEach((l) => ol.append(el('li', { onclick: () => { const p = currentProvider(); if (p) p.seek(l.t); } }, l.text || '♪')));
+  } else {
+    ly.plain.split(/\r?\n/).forEach((l) => ol.append(el('li', {}, l || ' ')));
+  }
+  ol.classList.toggle('plain', !ly.synced);
+  ol.scrollTop = 0;
+  ol.hidden = false;
+  $('stage-art').hidden = true;
+}
+
+function syncLyrics(pos) {
+  if (!stage.lines) return;
+  let i = stage.lines.length - 1;
+  while (i >= 0 && stage.lines[i].t > pos + 250) i--; // 250 ms adiantado: a linha acende junto com a voz
+  if (i === stage.idx) return;
+  const ol = $('lyrics');
+  if (ol.children[stage.idx]) ol.children[stage.idx].classList.remove('on');
+  stage.idx = i;
+  const li = ol.children[i];
+  if (!li) return;
+  li.classList.add('on');
+  ol.scrollTo({ top: li.offsetTop - ol.clientHeight / 2 + li.offsetHeight / 2, behavior: 'smooth' });
 }
 
 // ---------- fila e reprodução ----------
@@ -304,6 +361,15 @@ async function playIndex(i) {
   $('time-pos').textContent = '0:00';
   $('time-dur').textContent = '0:00';
   $('now-artist').textContent = 'Preparando…';
+  // enquanto baixa, o palco já mostra a capa (a letra vem quando a música começa)
+  stage.token++;
+  stage.lines = null;
+  stage.art = null;
+  $('lyrics').hidden = true;
+  $('stage').hidden = false;
+  $('stage-art').hidden = false;
+  setStageArt(null);
+  ensureArt(track).then((a) => { if (token === playToken && !stage.art && a) setStageArt(a.l); });
 
   try {
     if (track.pending) {
@@ -325,6 +391,7 @@ async function playIndex(i) {
     pushRecent(track);
     pruneCache();
     prefetch(i + 1);
+    loadStage(track);
   } catch (e) {
     if (token !== playToken) return;
     state.playing = false;
@@ -369,6 +436,7 @@ Object.values(providers).forEach((p) => {
     }
     $('time-pos').textContent = fmt(pos);
     $('time-dur').textContent = fmt(state.duration);
+    syncLyrics(pos);
   });
   p.on('end', () => { if (currentProvider() === p) next(); });
   p.on('error', (msg) => toast(msg));
