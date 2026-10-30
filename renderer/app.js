@@ -1019,6 +1019,18 @@ $('btn-jam-decline').addEventListener('click', () => {
   jamInvite = null;
 });
 
+// ---------- seu nick do Soulseek (para passar a quem for te chamar para uma jam) ----------
+window.api.authState().then((s) => {
+  if (!s || !s.user) return;
+  $('me').textContent = '@' + s.user;
+  $('me').hidden = false;
+}).catch(() => {});
+$('me').addEventListener('click', () => {
+  navigator.clipboard.writeText($('me').textContent.slice(1))
+    .then(() => toast('Nick copiado.', 2000, 'ok'))
+    .catch(() => {});
+});
+
 // ---------- início ----------
 (function init() {
   renderQueue();
