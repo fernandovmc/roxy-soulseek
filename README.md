@@ -1,76 +1,76 @@
 # Roxy
 
-**Roxy** é um aplicativo desktop de música para Windows, desenvolvido com Electron e integrado à rede Soulseek. Ele permite entrar com uma conta Soulseek, pesquisar arquivos de áudio compartilhados por outros usuários, baixar uma faixa e reproduzi-la no próprio player.
+**Roxy** is a Windows desktop music player built with Electron and integrated with the Soulseek network. Sign in with your Soulseek account, search for audio files shared by other users, download tracks, and play your music directly in Roxy.
 
-> O Roxy não mantém um catálogo próprio nem hospeda músicas. As buscas e transferências usam a rede Soulseek por meio do serviço slskd, que o aplicativo prepara automaticamente na primeira execução.
+> Roxy does not host music or provide its own music catalog. Searches and transfers use the Soulseek network through the slskd service, which Roxy is designed to set up automatically on first launch.
 
-## O que esta versão faz
+## Features
 
-- Login com usuário e senha do Soulseek pela tela inicial.
-- Opção **Manter conectado** para facilitar os próximos acessos.
-- Preparação e inicialização automática do serviço slskd na primeira execução.
-- Pesquisa de arquivos de áudio disponíveis na rede Soulseek.
-- Exibição dos resultados e início de downloads pelo próprio player.
-- Reprodução do arquivo depois que ele fica disponível no computador.
-- Interface visual personalizada, com transparência, imagem de fundo e identidade própria do Roxy.
-- Atalhos e controles de reprodução integrados à interface.
+- Soulseek account login through the app's welcome screen.
+- **Keep me signed in** option for easier future access.
+- Automatic setup and startup of the slskd service on first launch.
+- Search for audio files shared across the Soulseek network.
+- Browse search results and start downloads from the player.
+- Play downloaded files locally once they are available.
+- Custom interface with transparency, background artwork, and Roxy branding.
+- Built-in playback controls and a dedicated login screen.
 
-A disponibilidade dos resultados e a velocidade dos downloads dependem dos usuários e das conexões da rede Soulseek.
+Search results and download speeds depend on other Soulseek users and their network connections.
 
-## Requisitos
+## Requirements
 
-- Windows 10 ou Windows 11 (64 bits).
-- Node.js instalado (inclui npm) para executar a partir do código-fonte ou gerar o instalador.
-- Conexão com a internet.
-- Uma conta Soulseek.
+- Windows 10 or Windows 11 (64-bit).
+- Node.js and npm (required to run from source or build the installer).
+- An internet connection.
+- A Soulseek account.
 
-Não é necessário instalar ou configurar o slskd manualmente: o Roxy foi preparado para baixar/configurar e iniciar o serviço durante a primeira execução.
+You do not need to manually install or configure slskd. Roxy is designed to prepare and start the required service during its first launch.
 
-## Executar o Roxy pelo código-fonte
+## Run Roxy from source
 
-1. Baixe o repositório pelo botão **Code → Download ZIP** e extraia o arquivo.
-2. Abra a pasta do projeto, onde está o arquivo `package.json`.
-3. Instale o Node.js caso ainda não esteja instalado: https://nodejs.org/
-4. Dê dois cliques em `abrir-roxy.bat`.
+1. Download the repository using **Code → Download ZIP**, then extract it.
+2. Open the extracted project folder containing `package.json`.
+3. Install Node.js if it is not already installed: https://nodejs.org/
+4. Double-click `abrir-roxy.bat`.
 
-O arquivo BAT verifica o Node.js, instala as dependências quando necessário e inicia o aplicativo.
+The batch file checks for Node.js, installs project dependencies when needed, and launches the app.
 
-Também é possível executar pelo terminal, aberto na pasta do projeto:
+You can also run Roxy from a terminal opened in the project folder:
 
 ```powershell
 npm install
 npm start
 ```
 
-Na primeira inicialização, aguarde o Roxy preparar o serviço necessário para a conexão com a rede. Se o Firewall do Windows solicitar permissão, permita o acesso para que a conexão funcione corretamente.
+On the first launch, give Roxy time to prepare the service required to connect to Soulseek. If Windows Firewall asks for permission, allow access so the connection can work properly.
 
-## Primeiro acesso
+## Getting started
 
-1. Abra o Roxy.
-2. Na tela de login, informe seu usuário e sua senha do Soulseek.
-3. Selecione **Manter conectado** se quiser facilitar os próximos acessos neste computador.
-4. Aguarde a inicialização do serviço e a conexão.
-5. Use a área de busca para procurar uma música.
-6. Escolha um resultado para iniciar o download. Quando o arquivo estiver disponível localmente, o player poderá reproduzi-lo.
+1. Launch Roxy.
+2. On the login screen, enter your Soulseek username and password.
+3. Enable **Keep me signed in** if you want Roxy to remember your login on this computer.
+4. Wait for the service to start and the connection to be established.
+5. Open the search area and search for a track.
+6. Select a result to start downloading it. Once the file is available locally, you can play it in Roxy.
 
-O botão **Sair** encerra a sessão salva e retorna à tela de login.
+Use **Log out** to end the saved session and return to the login screen.
 
-## Gerar o instalador do Windows
+## Build the Windows installer
 
-1. Instale o Node.js.
-2. Abra a pasta do projeto.
-3. Dê dois cliques em `gerar-instalador.bat`.
+1. Install Node.js.
+2. Open the Roxy project folder.
+3. Double-click `gerar-instalador.bat`.
 
-Ou execute no terminal:
+Or run the following commands in a terminal:
 
 ```powershell
 npm install
 npm run dist
 ```
 
-O Electron Builder gera o instalador na pasta `dist/`, com o nome no formato `Roxy Setup x.x.x.exe`. A configuração atual cria atalhos no Menu Iniciar e na Área de Trabalho.
+Electron Builder creates the installer in the `dist/` directory. The installer filename follows the `Roxy Setup x.x.x.exe` format. The current build configuration creates Start Menu and Desktop shortcuts.
 
-## Como o aplicativo é organizado
+## Project structure
 
 ```text
 roxy/
@@ -97,55 +97,55 @@ roxy/
         └── soulseek.js
 ```
 
-### Arquivos importantes
+### Key files
 
-- `main.js`: processo principal do Electron; gerencia a janela, integração com o sistema e comunicação com o serviço Soulseek/slskd.
-- `preload.js`: disponibiliza ao player apenas as funções necessárias do processo principal.
-- `renderer/index.html`, `app.js` e `styles.css`: estrutura, comportamento e aparência da tela principal.
-- `renderer/login.html`, `login.js` e `login.css`: tela de entrada e sua lógica visual.
-- `renderer/providers/soulseek.js`: integração usada pelo player para pesquisar, acompanhar transferências e reproduzir arquivos da rede Soulseek.
-- `renderer/background.jpg`: imagem de fundo da interface principal.
-- `renderer/login-photo.jpg`: imagem da tela de login.
-- `renderer/dance.webp`: animação exibida durante o carregamento/transferência.
-- `renderer/icon.png`, `build/icon.png` e `build/icon.ico`: ícones da interface e do aplicativo/instalador.
-- `abrir-roxy.bat`: instalação das dependências (quando necessário) e inicialização rápida.
-- `gerar-instalador.bat`: preparação do ambiente e geração do instalador.
+- `main.js`: Electron main process. Manages the application window, system integration, and communication with the Soulseek/slskd service.
+- `preload.js`: Exposes the required, limited set of main-process functions to the player.
+- `renderer/index.html`, `app.js`, and `styles.css`: Main player interface, application behavior, and visual styling.
+- `renderer/login.html`, `login.js`, and `login.css`: Login screen and its behavior and styling.
+- `renderer/providers/soulseek.js`: Soulseek integration used to search, monitor transfers, and work with downloaded files.
+- `renderer/background.jpg`: Main player background image.
+- `renderer/login-photo.jpg`: Login screen artwork.
+- `renderer/dance.webp`: Animation used during loading or transfers.
+- `renderer/icon.png`, `build/icon.png`, and `build/icon.ico`: Interface and application/installer icons.
+- `abrir-roxy.bat`: Installs dependencies when needed and starts Roxy.
+- `gerar-instalador.bat`: Prepares the environment and builds the Windows installer.
 
-## Personalizar
+## Customization
 
-Você pode substituir as imagens mantendo os mesmos nomes e formatos:
+You can replace the artwork while keeping the same filenames and formats:
 
-- Fundo do player: `renderer/background.jpg`.
-- Foto da tela de login: `renderer/login-photo.jpg`.
-- Animação: `renderer/dance.webp`.
-- Ícone mostrado na interface: `renderer/icon.png`.
-- Ícone do executável/instalador: `build/icon.ico` e `build/icon.png`.
+- Player background: `renderer/background.jpg`.
+- Login screen image: `renderer/login-photo.jpg`.
+- Animation: `renderer/dance.webp`.
+- Icon displayed in the interface: `renderer/icon.png`.
+- Executable and installer icons: `build/icon.ico` and `build/icon.png`.
 
-Para alterar cores, transparência, espaçamentos e outros detalhes visuais, edite `renderer/styles.css`. Para alterar o comportamento do player, consulte `renderer/app.js` e o provedor em `renderer/providers/soulseek.js`.
+To change colors, transparency, spacing, and other visual details, edit `renderer/styles.css`. To change player behavior, review `renderer/app.js` and the integration in `renderer/providers/soulseek.js`.
 
-## Origem dos serviços e tecnologias
+## Technology and service overview
 
-- **Soulseek**: rede P2P utilizada para localizar e transferir arquivos compartilhados por seus usuários.
-- **slskd**: serviço/cliente que faz a conexão com a rede Soulseek e oferece uma API local utilizada pelo Roxy. O aplicativo automatiza sua preparação para que o usuário não precise configurar tudo manualmente.
-- **Electron**: tecnologia que permite construir o aplicativo desktop usando JavaScript, HTML e CSS.
-- **electron-builder**: ferramenta usada para empacotar o Roxy em um instalador para Windows.
+- **Soulseek**: A peer-to-peer network used by its users to find and transfer shared files.
+- **slskd**: A client/service that connects to Soulseek and provides a local API used by Roxy. Roxy automates its setup so users do not have to configure it manually.
+- **Electron**: A framework for building desktop applications with JavaScript, HTML, and CSS.
+- **electron-builder**: A tool used to package Roxy as a Windows installer.
 
-Projetos oficiais:
+Official projects:
 - Soulseek: https://www.slsknet.org/
 - slskd: https://github.com/slskd/slskd
 - Electron: https://www.electronjs.org/
 - electron-builder: https://www.electron.build/
 
-## Solução de problemas
+## Troubleshooting
 
-- **O comando npm não é reconhecido:** instale o Node.js e abra um novo terminal.
-- **O aplicativo não inicia:** execute `npm install` na pasta que contém `package.json` e tente `npm start` novamente.
-- **O login ou a conexão falha:** confira usuário e senha Soulseek e verifique se o Firewall do Windows não está bloqueando o Roxy ou o serviço auxiliar.
-- **A busca não retorna resultados:** tente outro termo de busca e confira sua conexão com a internet e o estado da conexão Soulseek.
-- **O download não começa ou fica parado:** a transferência depende de o outro usuário estar online, permitir o envio e ter o arquivo disponível.
+- **The npm command is not recognized:** Install Node.js and open a new terminal window.
+- **Roxy does not start:** Run `npm install` in the folder containing `package.json`, then try `npm start` again.
+- **Login or connection fails:** Check your Soulseek username and password. Also make sure Windows Firewall is not blocking Roxy or its supporting service.
+- **Search returns no results:** Try a different search term and check your internet connection and Soulseek connection status.
+- **A download does not start or gets stuck:** Transfers depend on the other user being online, allowing the transfer, and having the file available.
 
-## Uso responsável
+## Responsible use
 
-O Soulseek é uma rede de compartilhamento entre usuários. O Roxy é apenas uma interface cliente e não verifica os direitos autorais dos arquivos encontrados. Baixe, compartilhe e reproduza somente conteúdo que você tenha autorização para utilizar, respeitando as leis locais e os termos dos serviços envolvidos.
+Soulseek is a user-to-user file-sharing network. Roxy is a client interface and does not verify the copyright status of files found through the network. Only download, share, and play content you are authorized to use, and follow applicable laws and service terms.
 
-O Roxy é um projeto independente e não é afiliado oficialmente ao Soulseek ou ao slskd.
+Roxy is an independent project and is not officially affiliated with Soulseek or slskd.
