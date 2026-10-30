@@ -255,6 +255,8 @@ function renderNow() {
   if (art.getAttribute('src') !== want) art.setAttribute('src', want);
   art.className = state.loading ? 'dance' : 'disc' + (state.playing ? ' spin' : '');
   if (!t) { stage.token++; $('stage').hidden = true; }
+  $('stage').classList.toggle('loading', state.loading);
+  $('stage-status').hidden = !state.loading;
 }
 
 function renderPlayButton() {
@@ -269,10 +271,17 @@ function renderPlayButton() {
 // ---------- palco central: letra sincronizada ou, sem letra, a capa girando ----------
 const stage = { token: 0, art: null, lines: null, idx: -1 };
 
+// Só troca a imagem: redesenhar o player aqui apagava o status de carregamento.
 function setStageArt(url) {
   stage.art = url || null;
   $('stage-art').src = url || 'icon.png';
-  renderNow();
+  if (!state.loading) $('now-art').setAttribute('src', stage.art || 'icon.png');
+}
+
+// Status enquanto procura/baixa: no player e embaixo da capa pulsando no centro.
+function setLoadStatus(text) {
+  $('now-artist').textContent = text;
+  $('stage-status').textContent = text;
 }
 
 async function loadStage(track) {
@@ -359,7 +368,8 @@ async function playIndex(i) {
   $('seek').value = 0;
   $('time-pos').textContent = '0:00';
   $('time-dur').textContent = '0:00';
-  $('now-artist').textContent = 'Preparando…';
+  Object.values(providers).forEach((p) => p.stop()); // a anterior para já, não depois da busca
+  setLoadStatus('Preparando…');
   // enquanto baixa, o palco já mostra a capa (a letra vem quando a música começa)
   stage.token++;
   stage.lines = null;
@@ -372,7 +382,7 @@ async function playIndex(i) {
 
   try {
     if (track.pending) {
-      $('now-artist').textContent = 'Procurando no Soulseek…';
+      setLoadStatus('Procurando no Soulseek…');
       const found = await resolve(track);
       if (token !== playToken) return;
       if (!found) {
@@ -382,7 +392,7 @@ async function playIndex(i) {
       }
     }
     await providers[track.source].play(track, (text) => {
-      if (token === playToken) $('now-artist').textContent = text;
+      if (token === playToken) setLoadStatus(text);
     });
     if (token !== playToken) return;
     state.playing = true;

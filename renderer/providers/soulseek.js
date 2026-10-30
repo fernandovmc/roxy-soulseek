@@ -338,6 +338,15 @@ class SoulseekProvider {
     return found;
   }
 
+  // Para e descarrega a faixa atual na hora do clique (antes da busca/download da próxima) e cancela
+  // um play em andamento. Sem isso a anterior seguia tocando enquanto a nova era procurada.
+  stop() {
+    this.job++;
+    this.audio.pause();
+    this.audio.removeAttribute('src');
+    this.audio.load();
+  }
+
   pause() { this.audio.pause(); }
   resume() { this.audio.play().catch(() => {}); }
   seek(ms) { this.audio.currentTime = ms / 1000; }
