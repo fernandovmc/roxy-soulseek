@@ -587,34 +587,58 @@ $('sp-go').addEventListener('click', async () => {
   try {
     const r = await window.api.spotifyFetch({ ids, names: spNames });
     if (!r.ok) { spStatus(r.error); return; }
-    let added = 0;
-    r.playlists.forEach((p) => {
-      const tracks = p.tracks.map((t) => ({
-        source: 'soulseek', id: 'sp:' + t.id, pending: true, title: t.title, artist: t.artist,
-        detail: 'Do Spotify', duration: t.duration
-      }));
-      let pl = playlists.find((x) => x.name === p.name);
-      if (!pl) {
-        pl = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: p.name, tracks: [] };
-        playlists.push(pl);
-      }
-      const have = new Set(pl.tracks.map(trackKey));
-      tracks.forEach((t) => { if (!have.has(trackKey(t))) { pl.tracks.push(slimTrack(t)); added++; } });
-    });
-    savePlaylists();
-    renderPlaylists();
     $('sp-picker').hidden = true;
-    let msg = r.playlists.length + ' playlist(s) importada(s) (' + added + ' faixas). Cada música é procurada no Soulseek quando você toca.';
-    if (r.skipped && r.skipped.length) {
-      msg += '\nO Spotify não liberou: ' + r.skipped.slice(0, 5).join(', ') + (r.skipped.length > 5 ? '…' : '') + '.';
-    }
-    spStatus(msg);
+    importSpotify(r);
   } catch (e) {
     spStatus(e.message);
   } finally {
     $('sp-go').disabled = false;
   }
 });
+
+function importSpotify(r) {
+  let added = 0;
+  r.playlists.forEach((p) => {
+    const tracks = p.tracks.map((t) => ({
+      source: 'soulseek', id: 'sp:' + t.id, pending: true, title: t.title, artist: t.artist,
+      detail: 'Do Spotify', duration: t.duration
+    }));
+    let pl = playlists.find((x) => x.name === p.name);
+    if (!pl) {
+      pl = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: p.name, tracks: [] };
+      playlists.push(pl);
+    }
+    const have = new Set(pl.tracks.map(trackKey));
+    tracks.forEach((t) => { if (!have.has(trackKey(t))) { pl.tracks.push(slimTrack(t)); added++; } });
+  });
+  savePlaylists();
+  renderPlaylists();
+  let msg = r.playlists.length + ' playlist(s) importada(s) (' + added + ' faixas). Cada música é procurada no Soulseek quando você toca.';
+  if (r.capped) msg += '\nPelo link vêm no máximo 100 faixas; para a playlist inteira, use "Minhas playlists do Spotify" (com login).';
+  if (r.skipped && r.skipped.length) {
+    msg += '\nO Spotify não liberou: ' + r.skipped.slice(0, 5).join(', ') + (r.skipped.length > 5 ? '…' : '') + '.';
+  }
+  spStatus(msg);
+}
+
+async function importSpotifyLink() {
+  const link = $('sp-link').value.trim();
+  if (!link) return;
+  $('btn-sp-link').disabled = true;
+  spStatus('Lendo o link do Spotify…');
+  try {
+    const r = await window.api.spotifyPublic(link);
+    if (!r.ok) { spStatus(r.error); return; }
+    $('sp-link').value = '';
+    importSpotify(r);
+  } catch (e) {
+    spStatus(e.message);
+  } finally {
+    $('btn-sp-link').disabled = false;
+  }
+}
+$('btn-sp-link').addEventListener('click', importSpotifyLink);
+$('sp-link').addEventListener('keydown', (e) => { if (e.key === 'Enter') importSpotifyLink(); });
 
 $('btn-pl-back').addEventListener('click', closePlaylist);
 $('btn-pl-play').addEventListener('click', () => {

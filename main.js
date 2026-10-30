@@ -158,6 +158,25 @@ function pruneCache(keep) {
   }
 }
 
+// ---------- playlist/álbum público do Spotify pelo link (sem login) ----------
+async function spotifyPublic(link) {
+  const m = String(link || '').match(/(playlist|album)[/:]([A-Za-z0-9]{22})/);
+  if (!m) throw new Error('Cole o link de uma playlist ou álbum do Spotify.');
+  const r = await fetch('https://open.spotify.com/embed/' + m[1] + '/' + m[2], {
+    headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(20000)
+  });
+  if (!r.ok) throw new Error('O Spotify não abriu esse link (erro ' + r.status + '). Ele é público?');
+  const j = (await r.text()).match(/<script id="__NEXT_DATA__"[^>]*>(.*?)<\/script>/s);
+  let e = null;
+  try { e = JSON.parse(j[1]).props.pageProps.state.data.entity; } catch {}
+  if (!e || !Array.isArray(e.trackList)) throw new Error('Não consegui ler esse link. A playlist é pública?');
+  // Limite conhecido: a página de embed traz no máximo 100 faixas; para mais, use o import com login.
+  const tracks = e.trackList.filter((t) => t && t.title).map((t) => ({
+    id: String(t.uri || '').split(':').pop() || t.title, title: t.title, artist: t.subtitle || '', duration: t.duration || undefined
+  }));
+  return { playlists: [{ name: e.name || e.title || 'Spotify', tracks }], skipped: [], capped: tracks.length >= 100 };
+}
+
 // ---------- imagem de fundo ----------
 const BG_EXT = ['jpg', 'jpeg', 'png', 'webp'];
 const BG_RE = /^background-\d+\.(jpg|jpeg|png|webp)$/i;
@@ -588,6 +607,8 @@ app.whenReady().then(() => {
     return f ? pathToFileURL(f).href : null;
   });
   ipcMain.handle('cache:prune', (_e, keep) => pruneCache(keep));
+  ipcMain.handle('spotify:public', (_e, link) =>
+    spotifyGuard(() => spotifyPublic(link)));
   ipcMain.handle('slsk:pickFolder', async () => {
     const r = await dialog.showOpenDialog({ title: 'Pasta de downloads do slskd', properties: ['openDirectory'] });
     return r.canceled ? null : r.filePaths[0];
