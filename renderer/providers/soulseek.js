@@ -230,7 +230,10 @@ class SoulseekProvider {
   async play(track, onStatus) {
     const job = ++this.job;
     const alive = () => job === this.job;
+    // Descarrega a música anterior: senão ▶/espaço/tecla de mídia durante o download retomam ela.
     this.audio.pause();
+    this.audio.removeAttribute('src');
+    this.audio.load();
 
     let url = await window.api.slskFind(track);
     if (!url) {
