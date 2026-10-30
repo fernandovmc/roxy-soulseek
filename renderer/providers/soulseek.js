@@ -65,8 +65,11 @@ function parentFolder(file) {
 function describeTransfer(f) {
   const st = String(f.state || '');
   if (/InProgress/i.test(st)) return 'Baixando… ' + Math.round(f.percentComplete || 0) + '%';
-  if (/Queued,\s*Remotely/i.test(st)) return 'Na fila do outro usuário…';
-  if (/Queued,\s*Locally/i.test(st)) return 'Na fila do slskd…';
+  if (/Queued,\s*Remotely/i.test(st)) {
+    return 'Esperando a vez com ' + (f.username || 'quem compartilha') +
+      (f.placeInQueue ? ' (posição ' + f.placeInQueue + ' na fila)' : '') + '…';
+  }
+  if (/Queued,\s*Locally/i.test(st)) return 'Na fila de downloads…';
   if (/Initializing/i.test(st)) return 'Iniciando o download…';
   if (/Requested/i.test(st)) return 'Pedindo o arquivo…';
   return st || 'Aguardando…';
