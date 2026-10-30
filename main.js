@@ -697,7 +697,7 @@ function createLoginWindow() {
 
 function createWindow() {
   mainWin = baseWindow({
-    width: 1080, height: 720, minWidth: 820, minHeight: 560,
+    width: 1280, height: 760, minWidth: 820, minHeight: 560,
     backgroundColor: '#0c1210'
   });
   mainWin.on('closed', () => { mainWin = null; });

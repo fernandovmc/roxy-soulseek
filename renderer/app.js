@@ -324,7 +324,6 @@ function syncLyrics(pos) {
 // ---------- fila e reprodução ----------
 function addToQueue(track, playNow = false) {
   state.queue.push({ ...track });
-  document.body.classList.add('queue-open');
   renderQueue(true);
   if (playNow || state.index === -1) playIndex(state.queue.length - 1);
 }
@@ -573,7 +572,6 @@ function playPlaylist(pl, start = 0) {
 function playTracks(tracks, start = 0) {
   state.queue = tracks.map((t) => ({ ...t }));
   state.index = -1;
-  document.body.classList.add('queue-open');
   renderQueue(true);
   playIndex(start);
 }
