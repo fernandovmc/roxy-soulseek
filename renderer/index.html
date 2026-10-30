@@ -25,6 +25,8 @@
       <div class="tabs" data-active="search" role="tablist">
         <span class="tab-ind"></span>
         <button class="tab active" data-tab="search" role="tab">Buscar</button>
+        <button class="tab" data-tab="saved" role="tab">Músicas</button>
+        <button class="tab" data-tab="recent" role="tab">Recentes</button>
         <button class="tab" data-tab="playlists" role="tab">Playlists</button>
       </div>
 
@@ -35,6 +37,19 @@
         </div>
         <p id="search-status" class="hint" hidden></p>
         <ul id="results" class="list"></ul>
+      </div>
+
+      <div id="tab-saved" class="tab-body" hidden>
+        <ul id="saved-list" class="list"></ul>
+        <p id="saved-empty" class="empty">Nada salvo ainda. Toque ♡ numa música para guardá-la aqui; o resto fica num cache que se limpa sozinho.</p>
+      </div>
+
+      <div id="tab-recent" class="tab-body" hidden>
+        <div class="row-actions">
+          <button id="btn-recent-clear" class="link" type="button">Limpar</button>
+        </div>
+        <ul id="recent-list" class="list"></ul>
+        <p id="recent-empty" class="empty">As músicas que você ouvir aparecem aqui.</p>
       </div>
 
       <div id="tab-playlists" class="tab-body" hidden>

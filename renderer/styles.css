@@ -85,17 +85,19 @@ button { cursor:pointer; }
   animation:slide-l 1.1s var(--spring) .12s both;
 }
 .tabs {
-  position:relative; display:grid; grid-template-columns:1fr 1fr; padding:3px; margin-bottom:14px;
+  position:relative; display:grid; grid-template-columns:repeat(4, 1fr); padding:3px; margin-bottom:14px;
   border:1px solid var(--line); border-radius:999px;
 }
 .tab-ind {
-  position:absolute; top:3px; bottom:3px; left:3px; width:calc(50% - 3px); border-radius:999px;
+  position:absolute; top:3px; bottom:3px; left:3px; width:calc(25% - 1.5px); border-radius:999px;
   background:rgba(255,255,255,.93); transition:transform .7s var(--spring);
 }
-.tabs[data-active="playlists"] .tab-ind { transform:translateX(100%); }
+.tabs[data-active="saved"] .tab-ind { transform:translateX(100%); }
+.tabs[data-active="recent"] .tab-ind { transform:translateX(200%); }
+.tabs[data-active="playlists"] .tab-ind { transform:translateX(300%); }
 .tab {
   position:relative; z-index:1; padding:8px 0; border:0; background:none;
-  font-size:11px; letter-spacing:.2em; color:var(--muted); transition:color .3s;
+  font-size:10px; letter-spacing:.1em; color:var(--muted); transition:color .3s;
 }
 .tab:hover { color:#fff; }
 .tab.active { color:#111; font-weight:500; }
@@ -176,6 +178,7 @@ input[type="search"]:focus,input[type="text"]:focus {
 }
 .actions button:hover { transform:scale(1.35) rotate(-10deg); background:rgba(255,255,255,.18); }
 .actions button:active { transform:scale(.8); }
+.actions button.on { color:var(--accent); }
 .pl-row { display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center; padding:6px; border-radius:16px;
   animation:item-in .75s var(--spring) backwards; animation-delay:calc(min(var(--i,0), 14) * 55ms);
   transition:translate .45s var(--spring), background .25s; }

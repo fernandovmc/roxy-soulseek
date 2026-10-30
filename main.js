@@ -107,6 +107,16 @@ async function slskRequest({ method, path: apiPath, body }) {
 const foundCache = new Map();
 const baseName = (p) => String(p).split(/[\\/]/).pop();
 
+function walkFiles(dir, fn, depth = 0) {
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  for (const e of entries) {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) { if (depth < 6) walkFiles(full, fn, depth + 1); }
+    else fn(full, e.name);
+  }
+}
+
 function findLocal(track) {
   const key = track.username + '|' + track.filename;
   const cached = foundCache.get(key);
@@ -115,24 +125,37 @@ function findLocal(track) {
   const want = baseName(track.filename).toLowerCase();
   let best = null;
   let bestTime = 0;
-  const walk = (dir, depth) => {
-    let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const e of entries) {
-      const full = path.join(dir, e.name);
-      if (e.isDirectory()) {
-        if (depth < 6) walk(full, depth + 1);
-      } else if (e.name.toLowerCase() === want) {
-        try {
-          const st = fs.statSync(full);
-          if ((!track.size || st.size === track.size) && st.mtimeMs > bestTime) { best = full; bestTime = st.mtimeMs; }
-        } catch {}
-      }
-    }
-  };
-  walk(settings.downloadsDir, 0);
+  walkFiles(settings.downloadsDir, (full, name) => {
+    if (name.toLowerCase() !== want) return;
+    try {
+      const st = fs.statSync(full);
+      if ((!track.size || st.size === track.size) && st.mtimeMs > bestTime) { best = full; bestTime = st.mtimeMs; }
+    } catch {}
+  });
   if (best) foundCache.set(key, best);
   return best;
+}
+
+// ---------- cache: o que só foi ouvido some sozinho; salvas (♥) e de playlists ficam ----------
+const CACHE_LIMIT = 5 * 1024 ** 3;
+
+function pruneCache(keep) {
+  const keepSet = new Set((Array.isArray(keep) ? keep : []).map((t) => baseName(t.filename).toLowerCase() + '|' + t.size));
+  const files = [];
+  let total = 0;
+  walkFiles(settings.downloadsDir, (full, name) => {
+    try {
+      const st = fs.statSync(full);
+      if (keepSet.has(name.toLowerCase() + '|' + st.size)) return; // salvas não contam no limite
+      files.push({ full, size: st.size, t: st.mtimeMs });
+      total += st.size;
+    } catch {}
+  });
+  files.sort((a, b) => a.t - b.t); // ouvidas há mais tempo saem primeiro (o play atualiza a data)
+  for (const f of files) {
+    if (total <= CACHE_LIMIT) break;
+    try { fs.unlinkSync(f.full); total -= f.size; } catch {}
+  }
 }
 
 // ---------- imagem de fundo ----------
@@ -561,8 +584,10 @@ app.whenReady().then(() => {
   ipcMain.handle('slsk:request', (_e, req) => slskRequest(req || {}));
   ipcMain.handle('slsk:find', (_e, track) => {
     const f = findLocal(track || {});
+    if (f) { try { const now = new Date(); fs.utimesSync(f, now, now); } catch {} }
     return f ? pathToFileURL(f).href : null;
   });
+  ipcMain.handle('cache:prune', (_e, keep) => pruneCache(keep));
   ipcMain.handle('slsk:pickFolder', async () => {
     const r = await dialog.showOpenDialog({ title: 'Pasta de downloads do slskd', properties: ['openDirectory'] });
     return r.canceled ? null : r.filePaths[0];

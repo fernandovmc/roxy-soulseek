@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('api', {
   spotifyList: () => ipcRenderer.invoke('spotify:list'),
   spotifyFetch: (req) => ipcRenderer.invoke('spotify:fetch', req),
+  cachePrune: (keep) => ipcRenderer.invoke('cache:prune', keep),
   onSpotifyProgress: (cb) => ipcRenderer.on('spotify:progress', (_e, m) => cb(m)),
   authState: () => ipcRenderer.invoke('auth:state'),
   authLogin: (p) => ipcRenderer.invoke('auth:login', p),

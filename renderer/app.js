@@ -76,6 +76,37 @@ const slimTrack = (t) => ({
   pending: t.pending
 });
 
+// "Minhas músicas" (♥) e "Recentes"
+let saved = store.get('saved', []);
+let recent = store.get('recent', []);
+const RECENT_MAX = 50;
+const isSaved = (t) => saved.some((s) => trackKey(s) === trackKey(t));
+
+function toggleSaved(track) {
+  if (isSaved(track)) saved = saved.filter((s) => trackKey(s) !== trackKey(track));
+  else saved.unshift(slimTrack(track));
+  store.set('saved', saved);
+  renderSaved();
+  renderRecent();
+  renderQueue();
+  return isSaved(track);
+}
+
+function pushRecent(track) {
+  recent = [slimTrack(track), ...recent.filter((t) => trackKey(t) !== trackKey(track))].slice(0, RECENT_MAX);
+  store.set('recent', recent);
+  renderRecent();
+}
+
+// O cache apaga o que só foi ouvido; músicas salvas e de playlists ficam.
+function pruneCache() {
+  const keep = [...saved, ...playlists.flatMap((pl) => pl.tracks)]
+    .filter((t) => !t.pending && t.filename)
+    .flatMap((t) => [t, ...(t.alts || [])])
+    .map((t) => ({ filename: t.filename, size: t.size }));
+  window.api.cachePrune(keep).catch(() => {});
+}
+
 // ---------- itens de lista ----------
 function trackItem(track, actions, extraClass = '', loading = false) {
   const art = loading
@@ -101,6 +132,42 @@ function playlistBtn(track) {
   return iconBtn('Adicionar à playlist', '♫', (e) => pickPlaylist(track, e.currentTarget), { 'data-pl-btn': '' });
 }
 
+function heartBtn(track) {
+  const on = isSaved(track);
+  const b = iconBtn(on ? 'Tirar de Minhas músicas' : 'Salvar em Minhas músicas', on ? '♥' : '♡', () => {
+    const now = toggleSaved(track);
+    b.textContent = now ? '♥' : '♡';
+    b.classList.toggle('on', now);
+    b.title = b.ariaLabel = now ? 'Tirar de Minhas músicas' : 'Salvar em Minhas músicas';
+  }, { class: on ? 'on' : '' });
+  return b;
+}
+
+// lista simples de faixas (Minhas músicas / Recentes): tocar a partir daqui, fila, playlist, ♥
+function renderTrackList(ul, empty, tracks) {
+  ul.replaceChildren();
+  ul.classList.add('still');
+  empty.hidden = tracks.length > 0;
+  tracks.forEach((t, i) =>
+    ul.append(trackItem(t, [
+      iconBtn('Tocar a partir daqui', '▶', () => playTracks(tracks, i)),
+      iconBtn('Adicionar à fila', '+', () => addToQueue(t)),
+      playlistBtn(t),
+      heartBtn(t)
+    ])));
+  stagger(ul);
+}
+const renderSaved = () => renderTrackList($('saved-list'), $('saved-empty'), saved);
+function renderRecent() {
+  renderTrackList($('recent-list'), $('recent-empty'), recent);
+  $('btn-recent-clear').hidden = !recent.length;
+}
+$('btn-recent-clear').addEventListener('click', () => {
+  recent = [];
+  store.set('recent', recent);
+  renderRecent();
+});
+
 function renderQueue(animate = false) {
   const ul = $('queue');
   ul.replaceChildren();
@@ -112,6 +179,7 @@ function renderQueue(animate = false) {
         [
           iconBtn('Tocar', '▶', () => playIndex(i)),
           playlistBtn(track),
+          heartBtn(track),
           iconBtn('Remover da fila', '✕', () => removeAt(i))
         ],
         i === state.index ? 'current' : '',
@@ -204,6 +272,8 @@ async function playIndex(i) {
     });
     if (token !== playToken) return;
     state.playing = true;
+    pushRecent(track);
+    pruneCache();
   } catch (e) {
     if (token !== playToken) return;
     state.playing = false;
@@ -293,7 +363,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ---------- abas ----------
-const TABS = ['search', 'playlists'];
+const TABS = ['search', 'saved', 'recent', 'playlists'];
 function showTab(name) {
   document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelector('.tabs').dataset.active = name;
@@ -334,7 +404,8 @@ async function doSearch() {
         trackItem(t, [
           iconBtn('Baixar e tocar agora', '▶', () => addToQueue(t, true)),
           iconBtn('Adicionar à fila', '+', () => addToQueue(t)),
-          playlistBtn(t)
+          playlistBtn(t),
+          heartBtn(t)
         ])
       )
     );
@@ -377,7 +448,11 @@ function addToPlaylist(pl, track) {
 
 function playPlaylist(pl, start = 0) {
   if (!pl.tracks.length) { toast('A playlist está vazia.', 3000); return; }
-  state.queue = pl.tracks.map((t) => ({ ...t }));
+  playTracks(pl.tracks, start);
+}
+
+function playTracks(tracks, start = 0) {
+  state.queue = tracks.map((t) => ({ ...t }));
   state.index = -1;
   document.body.classList.add('queue-open');
   renderQueue(true);
@@ -432,6 +507,7 @@ function renderPlaylistDetail() {
       trackItem(t, [
         iconBtn('Tocar a partir daqui', '▶', () => playPlaylist(pl, i)),
         iconBtn('Adicionar à fila', '+', () => addToQueue(t)),
+        heartBtn(t),
         iconBtn('Remover da playlist', '✕', () => {
           pl.tracks.splice(i, 1);
           savePlaylists();
@@ -659,6 +735,8 @@ window.addEventListener('mousemove', (e) => {
 (function init() {
   renderQueue();
   renderPlaylists();
+  renderSaved();
+  renderRecent();
   fillRange($('seek'));
   fillRange($('volume'));
   window.api.bgGet().then(setBackground).catch(() => {});
