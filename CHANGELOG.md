@@ -20,6 +20,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The album cover spins in the center of the window when a track has no lyrics.
 - Album covers in track lists, the queue and the player bar, from the embedded FLAC picture or the Deezer search API.
 - FLAC metadata (artist, title, embedded cover) is read to look up lyrics with clean tags.
+- Jam sessions: invite other Roxy users by Soulseek username to listen together. Track, position and play state are synchronized through Soulseek private messages.
+- Playlist covers: the Spotify cover for imported playlists, or a mosaic of the first four track covers.
+- The signed-in Soulseek username is shown in the header and can be copied with a click.
+- Loading status (search, peer queue, download progress) under the cover in the center of the window.
 
 ### Changed
 
@@ -33,6 +37,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 
 - Pressing play, the space bar, or a media key while a new track was downloading resumed the previous track.
+- The previous track kept playing while a Spotify-imported track was being looked up on Soulseek.
+- The loading status in the player bar was overwritten when the cover arrived.
+- The lyrics and cover were off-center when the queue was closed.
 
 ## [0.4.0]
 

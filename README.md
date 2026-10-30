@@ -30,7 +30,8 @@ You do not need to install Node.js to use the packaged application. If Windows d
 - Playback queue with play, pause, previous, next, seek, and volume controls.
 - Library: save tracks with the heart button, browse recently played tracks, and create and manage local playlists.
 - Bounded download cache: tracks you only listened to are cleaned up automatically; saved and playlist tracks are kept.
-- Synced lyrics in the center of the window, with the album cover spinning when no lyrics are available, and album covers in every track list.
+- Synced lyrics in the center of the window, with the album cover spinning when no lyrics are available, and album covers in every track list and playlist.
+- Jam: listen together with other Roxy users, synchronized through Soulseek private messages.
 - Import public Spotify playlists and albums by pasting a link (no login), or import your own playlists and liked songs through Spotify's authorization flow.
 - Choose a custom background and adjust the glass/transparency appearance.
 - Optionally remember the Soulseek login on the device.
@@ -105,7 +106,7 @@ The left panel has four tabs:
 | **Buscar** (Search) | Soulseek search. Each row is one song; the detail line shows format and resolution (for example `FLAC 24/96`), size, and how many peers share it. |
 | **Músicas** (Saved) | Tracks saved with the heart (♡/♥) button, available from search results, the queue, playlists, and history. |
 | **Recentes** (Recent) | The last 50 tracks played, most recent first. **Limpar** clears the list. |
-| **Playlists** | Local playlists, Spotify link import, and the signed-in Spotify import. |
+| **Playlists** | Local playlists with their covers, Spotify link import, and the signed-in Spotify import. Imported playlists keep their Spotify cover; other playlists show a mosaic of their first four tracks. |
 
 ## Search ranking
 
@@ -145,6 +146,29 @@ The center of the window shows the lyrics of the current track. Synced lyrics hi
 - **Artwork.** Covers come from the embedded FLAC picture when present, otherwise from the [Deezer search API](https://developers.deezer.com/api/search). They are shown in track lists, the queue, the player bar, and the center of the window.
 
 When the queue is open in a window narrower than 1180 px, the center is hidden because there is not enough room.
+
+## Jam (listen together)
+
+A jam lets other Roxy users listen to what you play, at the same position. There is no server: commands travel as Soulseek private messages through slskd, and every participant downloads the track from Soulseek on their own machine.
+
+### Hosting
+
+1. Click **Jam** in the header.
+2. Type the other person's Soulseek username and click **Convidar**. Your own username is shown next to the Jam button; click it to copy it.
+3. The panel lists who was invited and who joined. Everything you play, pause, seek, or skip is sent to the guests.
+4. **Encerrar a jam** ends the session for everyone.
+
+### Joining
+
+When someone invites you, a card appears at the bottom of the window. Click **Entrar** to join or **Recusar** to decline. While you are in a jam, Roxy plays the host's track, prefetches the next ones, follows play and pause, and corrects the position when it drifts more than 2 seconds. **Sair da jam** leaves the session.
+
+### How it works and limitations
+
+- **Messages.** Each command is a private message with a `ROXYJAM1` prefix followed by JSON. Roxy only reads and acknowledges messages with that prefix; other conversations are left unread. Invites start with a readable sentence so that a person opening the conversation in another Soulseek client understands it.
+- **Everyone needs Roxy.** Guests using another Soulseek client only see the invite text.
+- **Sync accuracy.** Messages take around one second to arrive, and the host sends its state on every action and every 15 seconds. Expect guests to be within 1 to 2 seconds of the host. The position is computed from the host's clock (the Soulseek server clock can be minutes off), so both computers should have their time set automatically.
+- **First track.** When the host changes track, guests need a few seconds to download it; their playback starts at the host's current position once the download completes.
+- **Invite expiry.** Invites older than 10 minutes are ignored, for example when the app is opened long after the invite was sent.
 
 ## Library and download cache
 
@@ -189,7 +213,8 @@ roxy-soulseek/
 └── renderer/
     ├── index.html                  # Main player interface
     ├── styles.css                  # Main interface styling
-    ├── app.js                      # Queue, playback UI, library, history, playlists and prefetch
+    ├── app.js                      # Queue, playback UI, library, history, playlists, lyrics stage and prefetch
+    ├── jam.js                      # Jam protocol over Soulseek private messages
     ├── login.html                  # Soulseek login screen
     ├── login.css
     ├── login.js
@@ -258,6 +283,8 @@ Keep the same filenames and paths unless you also update the references in the s
 ## Data and privacy
 
 Roxy stores its settings in Electron's per-user application data directory. The app uses Electron's `safeStorage` when available to protect saved credentials and the local slskd API key. If operating-system encryption is unavailable, the current implementation falls back to base64 encoding, which is **not encryption**. Do not use the remember-login option on a shared or untrusted Windows account.
+
+Jam sessions exchange private messages with the usernames you invite or accept; those messages contain track file names, titles, and playback positions.
 
 To show lyrics and artwork, Roxy sends the artist and title of the playing track (and of listed tracks, for covers) to LRCLIB, NetEase Music and Deezer. No account or personal data is sent.
 
