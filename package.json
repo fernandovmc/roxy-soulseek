@@ -1,0 +1,42 @@
+{
+  "name": "roxy",
+  "version": "0.4.0",
+  "description": "Roxy: player de música para Windows (Soulseek)",
+  "main": "main.js",
+  "author": "Roxy",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^44.1.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.roxy.app",
+    "productName": "Roxy",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "build/icon.png",
+      "renderer/**/*"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Roxy"
+    }
+  }
+}
